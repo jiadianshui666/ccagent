@@ -15,6 +15,7 @@ import {
   createUsageStats,
   formatAggregateCost,
   formatUsageBudget,
+  isUsageBudgetExceeded,
   noopAuditLogger,
   type AuditLogger,
   type ModelTurnAuditEventInput,
@@ -212,6 +213,13 @@ const MAX_VERIFICATION_STABILITY_RUNS = 10;
 
 async function denyToolApproval(): Promise<boolean> {
   return false;
+}
+
+class BudgetExceededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BudgetExceededError";
+  }
 }
 
 export class Agent {
@@ -547,6 +555,12 @@ export class Agent {
 
       return await this.runAgentLoop(message, options.onStreamEvent, options.signal);
     } catch (error) {
+      if (error instanceof BudgetExceededError) {
+        return {
+          content: `Stopped: ${error.message}`,
+        };
+      }
+
       const reason = error instanceof Error ? error.message : String(error);
 
       return {
@@ -3538,6 +3552,10 @@ export class Agent {
 
     addUsageRecord(turnStats, usageRecord);
     addUsageRecord(this.usageTotals, usageRecord);
+
+    if (isUsageBudgetExceeded(this.usageTotals)) {
+      throw new BudgetExceededError(`token or cost budget exceeded — ${formatUsageBudget(this.usageTotals)}`);
+    }
 
     if (!audit || !onStreamEvent) {
       return;

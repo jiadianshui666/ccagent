@@ -20,6 +20,7 @@ import {
   formatRecentToolAudit,
   formatUsageModels,
   formatUsageSummary,
+  isUsageBudgetExceeded,
   getToolAuditLogPath,
   type AuditLogger,
   type ToolAuditEvent,
@@ -2241,5 +2242,59 @@ test("formatAuditSpanTree renders a nested agent/tool/model tree", async () => {
     );
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test("isUsageBudgetExceeded checks configured token and cost budgets", () => {
+  const prevTokens = process.env.CCAGENT_MAX_TOTAL_TOKENS;
+  const prevCost = process.env.CCAGENT_MAX_COST_USD;
+
+  try {
+    const stats = createUsageStats();
+    stats.totalTokens = 50;
+
+    delete process.env.CCAGENT_MAX_TOTAL_TOKENS;
+    delete process.env.CCAGENT_MAX_COST_USD;
+    assert.equal(isUsageBudgetExceeded(stats), false);
+
+    process.env.CCAGENT_MAX_TOTAL_TOKENS = "100";
+    assert.equal(isUsageBudgetExceeded(stats), false);
+
+    process.env.CCAGENT_MAX_TOTAL_TOKENS = "49";
+    assert.equal(isUsageBudgetExceeded(stats), true);
+  } finally {
+    if (prevTokens === undefined) {
+      delete process.env.CCAGENT_MAX_TOTAL_TOKENS;
+    } else {
+      process.env.CCAGENT_MAX_TOTAL_TOKENS = prevTokens;
+    }
+
+    if (prevCost === undefined) {
+      delete process.env.CCAGENT_MAX_COST_USD;
+    } else {
+      process.env.CCAGENT_MAX_COST_USD = prevCost;
+    }
+  }
+});
+
+test("Agent stops when the token budget is exceeded", async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-budget-"));
+  const prevTokens = process.env.CCAGENT_MAX_TOTAL_TOKENS;
+  process.env.CCAGENT_MAX_TOTAL_TOKENS = "1";
+
+  try {
+    await writeFile(join(workspaceRoot, "sample.txt"), "hello\n", "utf8");
+    const agent = new Agent(new MockModelClient(), undefined, workspaceRoot, async () => true);
+    const response = await agent.handleUserMessage("list files");
+
+    assert.match(response.content, /Stopped: token or cost budget exceeded/);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+
+    if (prevTokens === undefined) {
+      delete process.env.CCAGENT_MAX_TOTAL_TOKENS;
+    } else {
+      process.env.CCAGENT_MAX_TOTAL_TOKENS = prevTokens;
+    }
   }
 });

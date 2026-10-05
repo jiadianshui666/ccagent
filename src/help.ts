@@ -945,7 +945,7 @@ export function formatHelp(): string {
     "  Use /usage-summary or /usage-summary --all to summarize token usage and optional cost.",
     "  Use /usage-models or /usage-models --all to compare token usage by model.",
     "  Set CCAGENT_INPUT_USD_PER_1M_TOKENS and CCAGENT_OUTPUT_USD_PER_1M_TOKENS to estimate cost.",
-    "  Set CCAGENT_MAX_TOTAL_TOKENS and CCAGENT_MAX_COST_USD to show budget status.",
+    "  Set CCAGENT_MAX_TOTAL_TOKENS and CCAGENT_MAX_COST_USD to track a token/cost budget and stop the run when it is exceeded.",
     "  Use /audit-call <callId> to inspect one correlated tool call.",
     "  Use /audit-summary or /audit-summary --all to summarize tool calls.",
     "  Use /audit-export summary --all or /audit-export call --all <callId> to write JSON exports.",

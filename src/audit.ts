@@ -2085,6 +2085,25 @@ export function formatAggregateCost(stats: UsageStats, includeTurns: boolean): s
   return includeTurns ? `${formatted} (${stats.costedTurns} costed turn(s))` : formatted;
 }
 
+export function isUsageBudgetExceeded(stats: UsageStats): boolean {
+  const totalTokenBudget = parseOptionalNonNegativeIntegerText(process.env.CCAGENT_MAX_TOTAL_TOKENS);
+  const costBudgetUsd = parseOptionalNonNegativeNumberText(process.env.CCAGENT_MAX_COST_USD);
+
+  if (totalTokenBudget !== undefined && stats.totalTokens > totalTokenBudget) {
+    return true;
+  }
+
+  if (costBudgetUsd !== undefined) {
+    const costUsd = calculateAggregateCostUsd(stats);
+
+    if (costUsd !== undefined && costUsd > costBudgetUsd) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export function formatUsageBudget(stats: UsageStats): string {
   const totalTokenBudgetText = process.env.CCAGENT_MAX_TOTAL_TOKENS;
   const costBudgetText = process.env.CCAGENT_MAX_COST_USD;
