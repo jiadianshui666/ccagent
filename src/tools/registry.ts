@@ -31,6 +31,8 @@ import { ListSymbolsTool, SearchSymbolsTool } from "./symbols.js";
 import { UpdateTaskStateTool } from "./taskState.js";
 import { UpdatePlanTool } from "./updatePlan.js";
 import { SuggestVerificationTool } from "./verifySuggest.js";
+import { WebFetchTool } from "./webFetch.js";
+import { WebSearchTool } from "./webSearch.js";
 import type { ShellSandboxSettings } from "../sandbox.js";
 import type { ExecutionGuardLevel } from "../injectionGuard.js";
 import type { Tool, ToolContext, ToolResult } from "./types.js";
@@ -130,6 +132,8 @@ export function createDefaultToolRegistry(
     new GitDiffTool(),
     new UpdatePlanTool(),
     new UpdateTaskStateTool(),
+    new WebFetchTool(),
+    new WebSearchTool(),
     ...additionalTools,
   ]);
 }

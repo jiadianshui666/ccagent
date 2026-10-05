@@ -285,6 +285,7 @@ const HELP_TOPICS: HelpTopic[] = [
       "Common tools:",
       "  list_files, workspace_info, read_file, search_files, suggest_context",
       "  run_subagent, run_subagents",
+      "  web_search, web_fetch",
       "  build_context_index, context_index_status, search_context_index",
       "  build_semantic_index, semantic_index_status, search_semantic_index",
       "  list_symbols, search_symbols, suggest_verification",

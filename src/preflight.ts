@@ -114,6 +114,14 @@ function getBaseToolRisk(
     };
   }
 
+  if (toolName === "web_fetch" || toolName === "web_search") {
+    return {
+      risk: "medium",
+      reasons: ["tool retrieves remote content over the network"],
+      workspaceImpact: "unknown",
+    };
+  }
+
   if (toolName === "build_context_index") {
     return {
       risk: "low",

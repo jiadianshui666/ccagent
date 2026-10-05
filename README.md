@@ -419,6 +419,8 @@ search_files
 suggest_context
 run_subagent
 run_subagents
+web_search
+web_fetch
 build_context_index
 context_index_status
 search_context_index

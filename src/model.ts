@@ -220,6 +220,7 @@ const BASE_SYSTEM_PROMPT = [
   "Use suggest_context when you need a short list of relevant files before reading them.",
   "Use run_subagent to delegate isolated research or scoped editing across several files without polluting the main conversation.",
   "Use run_subagents to run several independent subagents in parallel (read-only by default; set write=true only for disjoint file edits, since overlapping writes are rejected).",
+  "Use web_search to find web pages for a question, then use web_fetch to retrieve a specific URL as readable text.",
   "Use search_context_index when a persistent local index is available and you need relevant files without scanning the whole workspace.",
   "Use build_context_index when the user asks to build, refresh, or update the local workspace index.",
   "Use search_semantic_index when a semantic vector index is available and the query is conceptual rather than exact text.",
