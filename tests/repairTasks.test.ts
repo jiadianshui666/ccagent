@@ -10,6 +10,8 @@ test("repair tasks are complete and uniquely named", () => {
   assert.ok(names.includes("order-service"));
   assert.ok(names.includes("truncate-boundary"));
   assert.ok(names.includes("date-pad"));
+  assert.ok(names.includes("cross-module-contract"));
+  assert.ok(names.includes("rounding-boundary"));
 });
 
 test("every repair task declares source, test, and a test entry point", () => {
@@ -25,5 +27,7 @@ test("findRepairTask resolves by name and returns undefined for unknown names", 
   assert.equal(findRepairTask("order-service")?.name, "order-service");
   assert.equal(findRepairTask("truncate-boundary")?.name, "truncate-boundary");
   assert.equal(findRepairTask("date-pad")?.name, "date-pad");
+  assert.equal(findRepairTask("cross-module-contract")?.name, "cross-module-contract");
+  assert.equal(findRepairTask("rounding-boundary")?.name, "rounding-boundary");
   assert.equal(findRepairTask("missing"), undefined);
 });

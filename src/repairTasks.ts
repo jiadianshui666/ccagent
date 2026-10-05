@@ -185,6 +185,77 @@ export const REPAIR_TASKS: RepairTask[] = [
       `${JSON.stringify({ scripts: { test: "node tests/format.test.js" } }, null, 2)}\n`,
     ),
   ]),
+  task("cross-module-contract", [
+    file(
+      "src/math.js",
+      [
+        "function add(a, b) {",
+        "  return a + b;",
+        "}",
+        "",
+        "module.exports = { add };",
+        "",
+      ].join("\n"),
+    ),
+    file(
+      "src/calc.js",
+      [
+        "const { add } = require('./math');",
+        "",
+        "function calcTotal(x, y) {",
+        "  return add(x) + y;",
+        "}",
+        "",
+        "module.exports = { calcTotal };",
+        "",
+      ].join("\n"),
+    ),
+    file(
+      "tests/calc.test.js",
+      [
+        "const assert = require('node:assert/strict');",
+        "const { calcTotal } = require('../src/calc');",
+        "",
+        "assert.equal(calcTotal(3, 4), 7);",
+        "assert.equal(calcTotal(10, 5), 15);",
+        "console.log('calc ok');",
+        "",
+      ].join("\n"),
+    ),
+    file(
+      "package.json",
+      `${JSON.stringify({ scripts: { test: "node tests/calc.test.js" } }, null, 2)}\n`,
+    ),
+  ]),
+  task("rounding-boundary", [
+    file(
+      "src/price.js",
+      [
+        "function roundToCents(amount) {",
+        "  return Math.round(amount);",
+        "}",
+        "",
+        "module.exports = { roundToCents };",
+        "",
+      ].join("\n"),
+    ),
+    file(
+      "tests/price.test.js",
+      [
+        "const assert = require('node:assert/strict');",
+        "const { roundToCents } = require('../src/price');",
+        "",
+        "assert.equal(roundToCents(1.25), 1.25);",
+        "assert.equal(roundToCents(2.5), 2.5);",
+        "console.log('rounding ok');",
+        "",
+      ].join("\n"),
+    ),
+    file(
+      "package.json",
+      `${JSON.stringify({ scripts: { test: "node tests/price.test.js" } }, null, 2)}\n`,
+    ),
+  ]),
 ];
 
 export function listRepairTaskNames(): string[] {
