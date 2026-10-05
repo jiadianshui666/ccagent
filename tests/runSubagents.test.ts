@@ -67,6 +67,17 @@ test("RunSubagentsTool rejects non-string or blank prompts", async () => {
   assert.match(result.ok ? "" : result.error, /non-empty strings/);
 });
 
+test("RunSubagentsTool rejects an oversized prompts array", async () => {
+  const tool = new RunSubagentsTool();
+  const result = await tool.execute(
+    { prompts: Array.from({ length: 11 }, (_, index) => `prompt ${index}`) },
+    { workspaceRoot: "." },
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.ok ? "" : result.error, /at most 10/);
+});
+
 test("RunSubagentsTool reports an unavailable runner", async () => {
   const tool = new RunSubagentsTool();
   const result = await tool.execute({ prompts: ["do research"] }, { workspaceRoot: "." });

@@ -1,5 +1,7 @@
 import type { Tool, ToolContext, ToolResult } from "./types.js";
 
+const MAX_PARALLEL_SUBAGENTS = 10;
+
 export class RunSubagentsTool implements Tool {
   readonly name = "run_subagents";
   readonly description =
@@ -36,6 +38,13 @@ export class RunSubagentsTool implements Tool {
       return {
         ok: false,
         error: "Expected input.prompts to be an array of non-empty strings.",
+      };
+    }
+
+    if (prompts.length > MAX_PARALLEL_SUBAGENTS) {
+      return {
+        ok: false,
+        error: `Expected input.prompts to contain at most ${MAX_PARALLEL_SUBAGENTS} items.`,
       };
     }
 
