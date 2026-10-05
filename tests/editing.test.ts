@@ -468,6 +468,15 @@ test("ReversePatchTool approvalMessage describes a reverse patch", () => {
   assert.match(message ?? "", /- demo\.txt: delete, \+0 -1, hunks=1/);
 });
 
+test("ApplyPatchTool documents the required unified diff format", () => {
+  const description = new ApplyPatchTool().parameters.properties.patch.description;
+
+  assert.match(description, /diff --git a\/<path> b\/<path>/);
+  assert.match(description, /--- a\/<path>/);
+  assert.match(description, /\+\+\+ b\/<path>/);
+  assert.match(description, /@@ -<oldStart>,<oldCount> \+<newStart>,<newCount> @@/);
+});
+
 test("ApplyPatchTool approvalMessage groups files by patch risk", () => {
   const message = new ApplyPatchTool().approvalMessage({
     patch: [
