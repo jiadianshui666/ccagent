@@ -1,12 +1,16 @@
 import type { PlanState } from "../plan.js";
 import type { TaskState, TaskStateUpdate } from "../taskState.js";
 
+export type RunSubagentsOptions = {
+  write?: boolean;
+};
+
 export type ToolContext = {
   workspaceRoot: string;
   updatePlan?: (plan: PlanState) => void;
   updateTaskState?: (update: TaskStateUpdate) => TaskState | undefined;
   runSubagent?: (prompt: string) => Promise<string>;
-  runSubagents?: (prompts: string[]) => Promise<string[]>;
+  runSubagents?: (prompts: string[], options?: RunSubagentsOptions) => Promise<string[]>;
 };
 
 export type ToolParameterSchema = {

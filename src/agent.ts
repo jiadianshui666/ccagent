@@ -65,7 +65,7 @@ import {
   type PlanStepStatus,
 } from "./plan.js";
 import { createDefaultToolRegistry, ToolRegistry } from "./tools/registry.js";
-import type { Tool, ToolContext, ToolResult } from "./tools/types.js";
+import type { Tool, ToolContext, ToolResult, RunSubagentsOptions } from "./tools/types.js";
 import {
   createEmptySession,
   type SessionData,
@@ -231,6 +231,7 @@ export class Agent {
   private automaticContextInvalidated = true;
   private automaticContextLastRefreshAt = 0;
   private readonly usageTotals: UsageStats = createUsageStats();
+  private readonly writtenPaths = new Set<string>();
 
   constructor(
     private readonly model: ModelClient = createModelClient(),
@@ -296,6 +297,10 @@ export class Agent {
 
   snapshotUsage(): UsageStats {
     return { ...this.usageTotals };
+  }
+
+  snapshotWrittenPaths(): string[] {
+    return [...this.writtenPaths].sort();
   }
 
   async handleUserMessage(
@@ -1426,7 +1431,7 @@ export class Agent {
       },
       updateTaskState: (update) => this.applyTaskStateUpdate(update),
       runSubagent: (prompt) => this.runSubagent(prompt),
-      runSubagents: (prompts) => this.runSubagents(prompts),
+      runSubagents: (prompts, options) => this.runSubagents(prompts, options),
     };
   }
 
@@ -1463,13 +1468,17 @@ export class Agent {
     return response.content;
   }
 
-  private async runSubagents(prompts: string[]): Promise<string[]> {
+  private async runSubagents(
+    prompts: string[],
+    options: RunSubagentsOptions = {},
+  ): Promise<string[]> {
+    const write = options.write === true;
     const children = await Promise.all(
       prompts.map(async (prompt) => {
         const childModel = this.model.createChild?.() ?? this.model;
         const child = new Agent(
           childModel,
-          this.buildSubagentToolRegistry(false),
+          this.buildSubagentToolRegistry(write),
           this.workspaceRoot,
           this.approveTool,
           this.debug,
@@ -1484,6 +1493,22 @@ export class Agent {
 
     for (const { child } of children) {
       this.adoptSubagentUsage(child);
+    }
+
+    if (write) {
+      const conflicts = detectWrittenPathConflicts(
+        children.map(({ child }) => child.snapshotWrittenPaths()),
+      );
+
+      if (conflicts.length > 0) {
+        throw new Error(
+          `Parallel subagents wrote conflicting paths: ${conflicts.join(", ")}. Re-run those edits serially.`,
+        );
+      }
+
+      for (const { child } of children) {
+        this.adoptSubagentPatch(child);
+      }
     }
 
     return children.map(({ content }) => content);
@@ -3263,6 +3288,10 @@ export class Agent {
       : [];
     const snapshotPath = typeof metadata?.snapshotPath === "string" ? metadata.snapshotPath : undefined;
 
+    for (const path of paths) {
+      this.writtenPaths.add(path);
+    }
+
     this.lastPatch = {
       patch,
       paths,
@@ -3685,6 +3714,21 @@ function buildSubagentPrompt(prompt: string): string {
     "Task:",
     prompt,
   ].join("\n");
+}
+
+export function detectWrittenPathConflicts(pathSets: string[][]): string[] {
+  const writersByPath = new Map<string, number>();
+
+  for (const paths of pathSets) {
+    for (const path of new Set(paths)) {
+      writersByPath.set(path, (writersByPath.get(path) ?? 0) + 1);
+    }
+  }
+
+  return [...writersByPath.entries()]
+    .filter(([, writerCount]) => writerCount > 1)
+    .map(([path]) => path)
+    .sort();
 }
 
 function isWorkspaceWriteTool(name: string): boolean {

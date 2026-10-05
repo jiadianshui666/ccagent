@@ -1,9 +1,29 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import test from "node:test";
-import { Agent } from "../src/agent.js";
+import { Agent, detectWrittenPathConflicts } from "../src/agent.js";
 import type { AuditLogger, ToolAuditEvent } from "../src/audit.js";
 import type { ModelClient, ModelResult, ModelTurnInput } from "../src/model.js";
 import { RunSubagentsTool } from "../src/tools/runSubagents.js";
+
+const execFileAsync = promisify(execFile);
+
+async function hasGit(): Promise<boolean> {
+  try {
+    await execFileAsync("git", ["--version"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeLineEndings(value: string): string {
+  return value.replace(/\r\n/g, "\n");
+}
 
 test("RunSubagentsTool delegates to the provided parallel runner", async () => {
   const tool = new RunSubagentsTool();
@@ -248,4 +268,183 @@ test("run_subagents rolls parallel child model usage into cumulative totals and 
 
   assert.equal(audit.events.filter((event) => event.type === "model_turn").length, 4);
   assert.equal(sumModelTurnTokens(audit), 330);
+});
+
+test("RunSubagentsTool forwards the write option", async () => {
+  const tool = new RunSubagentsTool();
+  let received: { prompts: string[]; options?: { write?: boolean } } | undefined;
+
+  const result = await tool.execute(
+    { prompts: ["edit X"], write: true },
+    {
+      workspaceRoot: ".",
+      runSubagents: async (prompts, options) => {
+        received = { prompts, options };
+        return ["ok"];
+      },
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(received?.prompts, ["edit X"]);
+  assert.equal(received?.options?.write, true);
+});
+
+test("RunSubagentsTool rejects a non-boolean write option", async () => {
+  const tool = new RunSubagentsTool();
+  const result = await tool.execute({ prompts: ["x"], write: "yes" }, { workspaceRoot: "." });
+
+  assert.equal(result.ok, false);
+  assert.match(result.ok ? "" : result.error, /boolean/);
+});
+
+test("detectWrittenPathConflicts reports paths written by multiple subagents", () => {
+  assert.deepEqual(
+    detectWrittenPathConflicts([["a.txt", "b.txt"], ["b.txt"], ["c.txt"], []]),
+    ["b.txt"],
+  );
+  assert.deepEqual(detectWrittenPathConflicts([["a.txt"], ["b.txt"], []]), []);
+  assert.deepEqual(detectWrittenPathConflicts([]), []);
+});
+
+class WriteChildModel implements ModelClient {
+  readonly name = "write-child";
+
+  constructor(
+    private readonly path: string,
+    private readonly oldString: string,
+    private readonly newString: string,
+  ) {}
+
+  async createTurn(input: ModelTurnInput): Promise<ModelResult> {
+    if (input.toolOutputs && input.toolOutputs.length > 0) {
+      return { content: `edited ${this.path}`, toolCalls: [] };
+    }
+
+    return {
+      content: "",
+      toolCalls: [
+        {
+          callId: `edit-${this.path}`,
+          name: "edit",
+          arguments: {
+            path: this.path,
+            old_string: this.oldString,
+            new_string: this.newString,
+            replace_all: false,
+          },
+          rawArguments: JSON.stringify({
+            path: this.path,
+            old_string: this.oldString,
+            new_string: this.newString,
+            replace_all: false,
+          }),
+        },
+      ],
+    };
+  }
+}
+
+class WriteParallelHostModel implements ModelClient {
+  readonly name = "write-host";
+  private childIndex = 0;
+
+  constructor(
+    private readonly childConfigs: Array<{ path: string; oldString: string; newString: string }>,
+  ) {}
+
+  async createTurn(input: ModelTurnInput): Promise<ModelResult> {
+    if (input.toolOutputs && input.toolOutputs.length > 0) {
+      return { content: input.toolOutputs[0]?.output ?? "", toolCalls: [] };
+    }
+
+    return {
+      content: "",
+      toolCalls: [
+        {
+          callId: "write-run-subagents",
+          name: "run_subagents",
+          arguments: { prompts: this.childConfigs.map(() => "make the edit"), write: true },
+          rawArguments: JSON.stringify({
+            prompts: this.childConfigs.map(() => "make the edit"),
+            write: true,
+          }),
+        },
+      ],
+    };
+  }
+
+  createChild(): ModelClient {
+    const config = this.childConfigs[this.childIndex];
+    this.childIndex += 1;
+
+    if (!config) {
+      throw new Error("not enough child configs");
+    }
+
+    return new WriteChildModel(config.path, config.oldString, config.newString);
+  }
+}
+
+test("run_subagents with write=true applies disjoint edits", async (t) => {
+  if (!(await hasGit())) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-write-parallel-"));
+
+  try {
+    await writeFile(join(workspaceRoot, "a.txt"), "aaa\n", "utf8");
+    await writeFile(join(workspaceRoot, "b.txt"), "bbb\n", "utf8");
+
+    const agent = new Agent(
+      new WriteParallelHostModel([
+        { path: "a.txt", oldString: "aaa", newString: "AAA" },
+        { path: "b.txt", oldString: "bbb", newString: "BBB" },
+      ]),
+      undefined,
+      workspaceRoot,
+      async () => true,
+    );
+
+    const response = await agent.handleUserMessage("edit two files");
+
+    assert.equal(normalizeLineEndings(await readFile(join(workspaceRoot, "a.txt"), "utf8")), "AAA\n");
+    assert.equal(normalizeLineEndings(await readFile(join(workspaceRoot, "b.txt"), "utf8")), "BBB\n");
+    assert.match(response.content, /edited a\.txt/);
+    assert.match(response.content, /edited b\.txt/);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test("run_subagents with write=true reports overlapping write conflicts", async (t) => {
+  if (!(await hasGit())) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-write-conflict-"));
+
+  try {
+    const content = Array.from({ length: 10 }, (_, index) => `line${String(index + 1).padStart(2, "0")}`).join("\n") + "\n";
+    await writeFile(join(workspaceRoot, "shared.txt"), content, "utf8");
+
+    const agent = new Agent(
+      new WriteParallelHostModel([
+        { path: "shared.txt", oldString: "line01", newString: "LINE01" },
+        { path: "shared.txt", oldString: "line10", newString: "LINE10" },
+      ]),
+      undefined,
+      workspaceRoot,
+      async () => true,
+    );
+
+    const response = await agent.handleUserMessage("edit the same file twice");
+
+    assert.match(response.content, /conflicting paths: shared\.txt/);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
 });
