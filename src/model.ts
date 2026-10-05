@@ -227,7 +227,7 @@ const BASE_SYSTEM_PROMPT = [
   "Use read_file when you need to inspect a local workspace file.",
   "Use list_skills to discover reusable project workflow guidance, then use read_skill only when a skill is relevant to the task.",
   "Use run_shell when you need to run a command, test, build, or inspect the environment.",
-  "Use apply_patch when you need to edit files. Always inspect relevant files before creating a patch.",
+  "Use apply_patch when you need to edit files. Always inspect relevant files before creating a patch, and emit the patch as a standard git unified diff following the format shown in the apply_patch tool's patch parameter.",
   "Use reverse_patch only when the user explicitly asks to undo or revert a known patch.",
   "Use git_status and git_diff to inspect workspace changes before summarizing modifications.",
   "Use update_plan to create or refresh a task plan for multi-step coding work.",

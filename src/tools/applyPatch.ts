@@ -16,7 +16,22 @@ export class ApplyPatchTool implements Tool {
     properties: {
       patch: {
         type: "string",
-        description: "Unified diff patch to apply inside the workspace.",
+        description: [
+          "Unified diff patch to apply to one or more workspace files. Use the standard git diff format so `git apply` accepts it:",
+          "start each file with a `diff --git a/<path> b/<path>` header, then `--- a/<path>` and `+++ b/<path>` file headers,",
+          "then one or more `@@ -<oldStart>,<oldCount> +<newStart>,<newCount> @@` hunk headers, then the changed lines",
+          "(context lines unprefixed, `-` for removed lines, `+` for added lines). The hunk line counts must match the actual",
+          "context/removed/added lines or the patch is rejected. Example for a one-line change:",
+          "diff --git a/src/domain/orders.js b/src/domain/orders.js",
+          "--- a/src/domain/orders.js",
+          "+++ b/src/domain/orders.js",
+          "@@ -3,6 +3,6 @@",
+          "   const subtotalCents = order.items.reduce(",
+          "-    (sum, item) => sum + item.unitCents,",
+          "+    (sum, item) => sum + item.unitCents * item.quantity,",
+          "     0,",
+          "   );",
+        ].join("\n"),
       },
     },
     required: ["patch"],
@@ -744,7 +759,7 @@ function diagnoseGitApplyFailure(result: ProcessResult): PatchFailureDiagnosis[]
 
   if (/corrupt patch|malformed patch|unrecognized input|No valid patches/i.test(text)) {
     diagnosis.push({
-      message: "Patch format looks invalid; regenerate a complete unified diff with diff headers, file headers, and hunk headers.",
+      message: "Patch format looks invalid; regenerate a complete unified diff. Each file needs a `diff --git a/<path> b/<path>` header, `--- a/<path>` and `+++ b/<path>` file headers, and `@@ -<oldStart>,<oldCount> +<newStart>,<newCount> @@` hunk headers whose counts match the context/removed/added lines.",
       suggestReread: false,
     });
   }
