@@ -432,6 +432,7 @@ patch_snapshot_history
 show_patch_snapshot
 restore_patch_snapshot
 run_shell
+edit
 apply_patch
 reverse_patch
 git_status
@@ -440,9 +441,9 @@ update_plan
 update_task_state
 ```
 
-`run_shell`, `apply_patch`, and `reverse_patch` require approval. In one-shot mode they are denied unless explicitly allowlisted.
-Use `--allow-edits` to auto-approve patch tools only; shell commands still require approval or a config allowlist.
-Use `--verify "<command>"` to run one explicit verification command after `apply_patch` succeeds.
+`run_shell`, `edit`, `apply_patch`, and `reverse_patch` require approval. In one-shot mode they are denied unless explicitly allowlisted.
+Use `--allow-edits` to auto-approve `edit`, `apply_patch`, and `reverse_patch`; shell commands still require approval or a config allowlist.
+Use `--verify "<command>"` to run one explicit verification command after `apply_patch` or `edit` succeeds.
 Use `/verify-suggest [paths...]` to suggest likely build, focused test, eval, and release-check commands from changed paths and package scripts.
 Use `/verify-run [paths...]` to run those suggested commands through the normal `run_shell` approval flow.
 Use `/verify-last` to run suggested verification for the most recent patch's recorded paths.
@@ -750,6 +751,7 @@ ccagent --no-session /provider-smoke --full
 ccagent --no-session /provider-smoke --full --save
 ccagent --no-session /provider-smoke --profile full --json
 ccagent --no-session /provider-repair
+ccagent --no-session /provider-repair --task date-pad
 ccagent --no-session /provider-repair --attempts 2 --save
 ccagent --no-session /provider-repair --json
 ccagent --no-session /provider-repair-reports
@@ -802,10 +804,12 @@ Use `/provider-profiles use <id>` to apply a saved profile back into
 `.ccagent/config.json`; it writes `model`, `openai.apiMode`, and
 `openai.baseURL` or unsets the base URL for the official OpenAI endpoint.
 Use `/provider-repair` after a real full provider smoke pass to run a controlled
-repair benchmark through the current model. It creates a temporary broken order
-service fixture, runs verification, asks the model to repair it through the same
-agent tool loop, and removes the fixture afterward. Add `--save` to write a
-Markdown and JSON benchmark report under `.ccagent/reports/`. Without
+repair benchmark through the current model. It builds a temporary broken project
+for each repair task, runs verification, asks the model to repair it through the
+same agent tool loop, and removes the fixtures afterward. By default it runs
+every repair task (`order-service`, `truncate-boundary`, `date-pad`) and reports
+a per-task summary; pass `--task <name>` to run a single task. Add `--save` to
+write a Markdown and JSON benchmark report under `.ccagent/reports/`. Without
 `OPENAI_API_KEY`, it reports `SKIP` and does not call the model.
 Use `/provider-repair-reports` to list saved repair benchmark reports. Use
 `/provider-repair-compare` to compare the latest two reports, and

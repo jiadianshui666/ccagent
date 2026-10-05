@@ -8,6 +8,7 @@ import test from "node:test";
 import { Agent, type AgentStreamEvent } from "../src/agent.js";
 import { MockModelClient, type ModelClient, type ModelResult, type ModelTurnInput } from "../src/model.js";
 import { ApplyPatchTool, ReversePatchTool } from "../src/tools/applyPatch.js";
+import { EditTool } from "../src/tools/edit.js";
 import { createDefaultToolRegistry } from "../src/tools/registry.js";
 
 const execFileAsync = promisify(execFile);
@@ -477,6 +478,182 @@ test("ApplyPatchTool documents the required unified diff format", () => {
   assert.match(description, /@@ -<oldStart>,<oldCount> \+<newStart>,<newCount> @@/);
 });
 
+test("EditTool replaces an exact string and writes a snapshot", async (t) => {
+  if (!(await hasGit())) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-edit-"));
+
+  try {
+    await mkdir(join(workspaceRoot, "src"), { recursive: true });
+    await writeFile(join(workspaceRoot, "src/orders.js"), "const a = 1;\nconst b = 2;\n", "utf8");
+
+    const result = await new EditTool().execute(
+      { path: "src/orders.js", old_string: "const a = 1;", new_string: "const a = 10;" },
+      { workspaceRoot },
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(
+      normalizeLineEndings(await readFile(join(workspaceRoot, "src/orders.js"), "utf8")),
+      "const a = 10;\nconst b = 2;\n",
+    );
+    assert.match(result.ok ? result.content : "", /Pre-edit snapshot: \.ccagent\/patch-snapshots\//);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test("EditTool rejects an old_string that is not present", async (t) => {
+  if (!(await hasGit())) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-edit-"));
+
+  try {
+    await writeFile(join(workspaceRoot, "demo.txt"), "hello\n", "utf8");
+
+    const result = await new EditTool().execute(
+      { path: "demo.txt", old_string: "missing", new_string: "x" },
+      { workspaceRoot },
+    );
+
+    assert.equal(result.ok, false);
+    assert.match(result.ok ? "" : result.error, /was not found/);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test("EditTool requires replace_all when old_string is ambiguous", async (t) => {
+  if (!(await hasGit())) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-edit-"));
+
+  try {
+    await writeFile(join(workspaceRoot, "demo.txt"), "[x]\n[x]\n", "utf8");
+
+    const result = await new EditTool().execute(
+      { path: "demo.txt", old_string: "[x]", new_string: "[y]" },
+      { workspaceRoot },
+    );
+
+    assert.equal(result.ok, false);
+    assert.match(result.ok ? "" : result.error, /matches 2 locations/);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test("EditTool replace_all replaces every occurrence", async (t) => {
+  if (!(await hasGit())) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-edit-"));
+
+  try {
+    await writeFile(join(workspaceRoot, "demo.txt"), "[x]\n[x]\n", "utf8");
+
+    const result = await new EditTool().execute(
+      { path: "demo.txt", old_string: "[x]", new_string: "[y]", replace_all: true },
+      { workspaceRoot },
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(normalizeLineEndings(await readFile(join(workspaceRoot, "demo.txt"), "utf8")), "[y]\n[y]\n");
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test("EditTool deletes old_string when new_string is empty", async (t) => {
+  if (!(await hasGit())) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-edit-"));
+
+  try {
+    await writeFile(join(workspaceRoot, "demo.txt"), "keep\ndrop\n", "utf8");
+
+    const result = await new EditTool().execute(
+      { path: "demo.txt", old_string: "drop\n", new_string: "" },
+      { workspaceRoot },
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(normalizeLineEndings(await readFile(join(workspaceRoot, "demo.txt"), "utf8")), "keep\n");
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test("EditTool rejects unsafe paths", async (t) => {
+  if (!(await hasGit())) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-edit-"));
+
+  try {
+    const result = await new EditTool().execute(
+      { path: "../outside.txt", old_string: "a", new_string: "b" },
+      { workspaceRoot },
+    );
+
+    assert.equal(result.ok, false);
+    assert.match(result.ok ? "" : result.error, /unsafe path/);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test("ApplyPatchTool recovers incorrect hunk line counts via --recount", async (t) => {
+  if (!(await hasGit())) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-apply-patch-recount-"));
+
+  try {
+    await writeFile(join(workspaceRoot, "demo.txt"), "a\nb\nc\n", "utf8");
+
+    const result = await new ApplyPatchTool().execute(
+      {
+        patch: [
+          "diff --git a/demo.txt b/demo.txt",
+          "--- a/demo.txt",
+          "+++ b/demo.txt",
+          "@@ -1,99 +1,99 @@",
+          " a",
+          "-b",
+          "+B",
+          " c",
+          "",
+        ].join("\n"),
+      },
+      { workspaceRoot },
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(normalizeLineEndings(await readFile(join(workspaceRoot, "demo.txt"), "utf8")), "a\nB\nc\n");
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 test("ApplyPatchTool approvalMessage groups files by patch risk", () => {
   const message = new ApplyPatchTool().approvalMessage({
     patch: [
@@ -506,6 +683,62 @@ test("ApplyPatchTool approvalMessage groups files by patch risk", () => {
   assert.match(message ?? "", /High risk files:\n- \.env: modify, \+1 -1, hunks=1/);
   assert.match(message ?? "", /Medium risk files:\n- src\/new\.ts: create, \+1 -0, hunks=1/);
   assert.match(message ?? "", /Low risk files:\n- docs\/readme\.md: modify, \+1 -0, hunks=1/);
+});
+
+class StaleApplyPatchModel implements ModelClient {
+  readonly name = "stale-apply-patch";
+  receivedToolOutput = "";
+
+  async createTurn(input: ModelTurnInput): Promise<ModelResult> {
+    if (input.toolOutputs && input.toolOutputs.length > 0) {
+      this.receivedToolOutput = input.toolOutputs[0]?.output ?? "";
+      return { content: "retried with refreshed content", toolCalls: [] };
+    }
+
+    return {
+      content: "",
+      toolCalls: [
+        {
+          callId: "stale-1",
+          name: "apply_patch",
+          arguments: {
+            patch: [
+              "diff --git a/note.txt b/note.txt",
+              "--- a/note.txt",
+              "+++ b/note.txt",
+              "@@ -1 +1 @@",
+              "-stale line",
+              "+new line",
+              "",
+            ].join("\n"),
+          },
+          rawArguments: JSON.stringify({ patch: "stale" }),
+        },
+      ],
+    };
+  }
+}
+
+test("Agent re-reads file content after a stale patch failure", async (t) => {
+  if (!(await hasGit())) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-stale-reread-"));
+
+  try {
+    await writeFile(join(workspaceRoot, "note.txt"), "actual content\n", "utf8");
+
+    const model = new StaleApplyPatchModel();
+    const agent = new Agent(model, undefined, workspaceRoot, async () => true);
+    await agent.handleUserMessage("fix note.txt");
+
+    assert.match(model.receivedToolOutput, /Reread current content of note\.txt/);
+    assert.match(model.receivedToolOutput, /actual content/);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
 });
 
 test("Agent can apply a mock generated patch when approved", async (t) => {

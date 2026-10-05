@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import {
   createModelClient,
   type ModelClient,
@@ -48,6 +50,8 @@ import {
 import {
   evaluateWritePathPolicy,
   evaluateWritePathsPolicy,
+  extractPatchPaths,
+  isSafeWorkspacePath,
   type WritePathPolicyEvaluation,
 } from "./pathPolicy.js";
 import {
@@ -1529,7 +1533,11 @@ export class Agent {
     });
     let finalResult = result;
 
-    if (name === "apply_patch" && result.ok) {
+    if (!result.ok) {
+      finalResult = await this.refreshStaleEditContext(name, input, result);
+    }
+
+    if ((name === "apply_patch" || name === "edit") && result.ok) {
       finalResult = this.verifyCommand
         ? await this.runVerificationAfterPatch(result, onStreamEvent)
         : await this.appendSuggestedVerificationAfterPatch(result);
@@ -1556,6 +1564,63 @@ export class Agent {
 
     this.debug("tool.result", summarizeToolResult(name, finalResult));
     return finalResult;
+  }
+
+  private async refreshStaleEditContext(
+    name: string,
+    input: Record<string, unknown>,
+    result: ToolResult,
+  ): Promise<ToolResult> {
+    if (result.ok) {
+      return result;
+    }
+
+    const stale = /hunks did not match|not found|matches \d+ locations|does not exist in index/i.test(result.error);
+
+    if (!stale) {
+      return result;
+    }
+
+    const paths = this.collectEditPaths(name, input);
+
+    if (paths.length === 0) {
+      return result;
+    }
+
+    const workspaceRoot = resolve(this.workspaceRoot);
+    const target = paths[0];
+
+    if (!isSafeWorkspacePath(workspaceRoot, target)) {
+      return result;
+    }
+
+    try {
+      const content = await readFile(resolve(workspaceRoot, target), "utf8");
+
+      return {
+        ok: false,
+        error: [
+          result.error,
+          "",
+          `Reread current content of ${target} for a corrected retry:`,
+          truncateForDisplay(content, 12000),
+        ].join("\n"),
+      };
+    } catch {
+      return result;
+    }
+  }
+
+  private collectEditPaths(name: string, input: Record<string, unknown>): string[] {
+    if (name === "edit" && typeof input.path === "string" && input.path.trim().length > 0) {
+      return [input.path.trim()];
+    }
+
+    if ((name === "apply_patch" || name === "reverse_patch") && typeof input.patch === "string") {
+      return extractPatchPaths(input.patch);
+    }
+
+    return [];
   }
 
   private async appendSuggestedVerificationAfterPatch(patchResult: ToolResult): Promise<ToolResult> {
@@ -3199,6 +3264,19 @@ export class Agent {
       );
     }
 
+    if (name === "edit" && typeof input.path === "string") {
+      return evaluateWritePathsPolicy(
+        [input.path],
+        {
+          allowWritePaths: this.toolPolicy.allowWritePaths,
+          denyWritePaths: this.toolPolicy.denyWritePaths,
+        },
+        {
+          missingPathReason: "Edit does not declare a writable path, but toolPolicy.allowWritePaths is set.",
+        },
+      );
+    }
+
     return {
       ok: true,
       paths: [],
@@ -3498,7 +3576,7 @@ function isPatchTool(name: string): boolean {
 }
 
 function isWorkspaceWriteTool(name: string): boolean {
-  return isPatchTool(name) || name === "restore_patch_snapshot";
+  return isPatchTool(name) || name === "restore_patch_snapshot" || name === "edit";
 }
 
 function formatPatchSnapshotsUsage(): string {

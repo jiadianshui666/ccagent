@@ -1,7 +1,7 @@
 import { createInterface, type Interface } from "node:readline/promises";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { stdin as input, stderr, stdout as output } from "node:process";
 import { CLI_VERSION, formatCliUsage, parseCliArgs } from "./args.js";
 import {
@@ -22,6 +22,7 @@ import {
   formatProviderProfileApplication,
 } from "./providerProfiles.js";
 import { formatArchitectureOverview } from "./architecture.js";
+import { findRepairTask, listRepairTaskNames, REPAIR_TASKS, type RepairTask } from "./repairTasks.js";
 import {
   buildBootGreeting,
   getMascotTheme,
@@ -4528,6 +4529,7 @@ type ProviderRepairBenchmarkRequest =
       json: boolean;
       ok: true;
       save: boolean;
+      task?: string;
     }
   | {
       error: string;
@@ -4561,6 +4563,7 @@ type ProviderRepairBenchmarkResult = {
   report?: ProviderRepairBenchmarkReportResult;
   status: "fail" | "pass" | "skip";
   summary: string;
+  tasks?: Array<{ name: string; status: "pass" | "fail" }>;
 };
 
 type ProviderRepairReportSummary = {
@@ -4696,30 +4699,52 @@ async function runProviderRepairBenchmarkCore(
     };
   }
 
-  const fixtureRoot = await mkdtemp(join(tmpdir(), "ccagent-provider-repair-"));
+  const tasks = request.task ? REPAIR_TASKS.filter((task) => task.name === request.task) : REPAIR_TASKS;
+  const taskResults: Array<{ name: string; status: "pass" | "fail" }> = [];
+  let firstInitial: string | undefined;
+  let firstRepair: string | undefined;
 
-  try {
-    await createProviderRepairBenchmarkFixture(fixtureRoot);
+  for (const task of tasks) {
+    const fixtureRoot = await mkdtemp(join(tmpdir(), "ccagent-provider-repair-"));
 
-    const agent = new Agent(createSmokeModelClient(runtime), undefined, fixtureRoot, async () => true);
-    await agent.handleUserMessage("/task-state set Provider repair benchmark order fixture");
-    const initial = await agent.handleUserMessage("/verify-run package.json");
-    const repair = await agent.handleUserMessage(`/repair-loop ${request.attempts}`);
-    const passed = repair.content.includes("Repair loop passed") && repair.content.includes("status: passed");
+    try {
+      await createRepairTaskFixture(fixtureRoot, task);
 
-    return {
-      ...base,
-      durationMs: Date.now() - startedAt,
-      initialVerification: initial.content,
-      repairLoop: repair.content,
-      status: passed ? "pass" : "fail",
-      summary: passed
-        ? "Real provider repaired the project fixture and passed verification."
-        : "Real provider did not repair the project fixture within the requested attempts.",
-    };
-  } finally {
-    await rm(fixtureRoot, { force: true, recursive: true });
+      const agent = new Agent(createSmokeModelClient(runtime), undefined, fixtureRoot, async () => true);
+      await agent.handleUserMessage(`/task-state set Provider repair benchmark ${task.name}`);
+      const initial = await agent.handleUserMessage("/verify-run package.json");
+      const repair = await agent.handleUserMessage(`/repair-loop ${request.attempts}`);
+      const passed = repair.content.includes("Repair loop passed") && repair.content.includes("status: passed");
+
+      taskResults.push({ name: task.name, status: passed ? "pass" : "fail" });
+
+      if (firstInitial === undefined) {
+        firstInitial = initial.content;
+      }
+
+      if (firstRepair === undefined) {
+        firstRepair = repair.content;
+      }
+    } finally {
+      await rm(fixtureRoot, { force: true, recursive: true });
+    }
   }
+
+  const passedCount = taskResults.filter((task) => task.status === "pass").length;
+  const allPassed = passedCount === taskResults.length;
+
+  return {
+    ...base,
+    fixture: taskResults.length === 1 ? taskResults[0].name : `${taskResults.length} tasks`,
+    durationMs: Date.now() - startedAt,
+    initialVerification: firstInitial,
+    repairLoop: firstRepair,
+    status: allPassed ? "pass" : "fail",
+    summary: allPassed
+      ? `Real provider repaired all ${taskResults.length} task(s) and passed verification.`
+      : `Real provider passed ${passedCount}/${taskResults.length} repair task(s).`,
+    tasks: taskResults,
+  };
 }
 
 function formatProviderRepairBenchmark(result: ProviderRepairBenchmarkResult): string {
@@ -4739,6 +4764,14 @@ function formatProviderRepairBenchmark(result: ProviderRepairBenchmarkResult): s
     `Attempts: ${result.attempts}`,
     `Duration: ${result.durationMs}ms`,
   ];
+
+  if (result.tasks && result.tasks.length > 0) {
+    lines.push("");
+    lines.push("Tasks:");
+    for (const task of result.tasks) {
+      lines.push(`  - ${task.name}: ${task.status.toUpperCase()}`);
+    }
+  }
 
   if (result.initialVerification) {
     lines.push("");
@@ -5098,118 +5131,12 @@ function getProviderRepairStatusRank(status: ProviderRepairBenchmarkResult["stat
   return 0;
 }
 
-async function createProviderRepairBenchmarkFixture(workspaceRoot: string): Promise<void> {
-  await mkdir(join(workspaceRoot, "src", "domain"), { recursive: true });
-  await mkdir(join(workspaceRoot, "src", "infra"), { recursive: true });
-  await mkdir(join(workspaceRoot, "tests"), { recursive: true });
-  await writeFile(
-    join(workspaceRoot, "src", "domain", "shipping.js"),
-    [
-      "const FREE_SHIPPING_THRESHOLD_CENTS = 5000;",
-      "",
-      "function calculateShippingCents(order) {",
-      "  return 0;",
-      "}",
-      "",
-      "module.exports = { FREE_SHIPPING_THRESHOLD_CENTS, calculateShippingCents };",
-      "",
-    ].join("\n"),
-    "utf8",
-  );
-  await writeFile(
-    join(workspaceRoot, "src", "domain", "tax.js"),
-    [
-      "function calculateTaxCents(subtotalCents, taxRate) {",
-      "  return Math.round(subtotalCents * taxRate);",
-      "}",
-      "",
-      "module.exports = { calculateTaxCents };",
-      "",
-    ].join("\n"),
-    "utf8",
-  );
-  await writeFile(
-    join(workspaceRoot, "src", "domain", "orders.js"),
-    [
-      "const { calculateShippingCents } = require('./shipping');",
-      "const { calculateTaxCents } = require('./tax');",
-      "",
-      "function summarizeOrder(order, config) {",
-      "  const subtotalCents = order.items.reduce((sum, item) => sum + item.unitCents, 0);",
-      "  const shippingCents = calculateShippingCents(order);",
-      "  const taxCents = calculateTaxCents(subtotalCents, config.taxRate);",
-      "",
-      "  return {",
-      "    id: order.id,",
-      "    subtotalCents,",
-      "    shippingCents,",
-      "    taxCents,",
-      "    grandTotalCents: subtotalCents + taxCents,",
-      "  };",
-      "}",
-      "",
-      "module.exports = { summarizeOrder };",
-      "",
-    ].join("\n"),
-    "utf8",
-  );
-  await writeFile(
-    join(workspaceRoot, "src", "infra", "config.js"),
-    [
-      "module.exports = {",
-      "  taxRate: 0.08,",
-      "  shippingCents: 799,",
-      "};",
-      "",
-    ].join("\n"),
-    "utf8",
-  );
-  await writeFile(
-    join(workspaceRoot, "src", "index.js"),
-    [
-      "const config = require('./infra/config');",
-      "const { summarizeOrder } = require('./domain/orders');",
-      "",
-      "module.exports = { config, summarizeOrder };",
-      "",
-    ].join("\n"),
-    "utf8",
-  );
-  await writeFile(
-    join(workspaceRoot, "tests", "order-summary.test.js"),
-    [
-      "const assert = require('node:assert/strict');",
-      "const { config, summarizeOrder } = require('../src');",
-      "",
-      "const summary = summarizeOrder({",
-      "  id: 'provider_repair_1',",
-      "  items: [",
-      "    { sku: 'desk', unitCents: 3200, quantity: 1 },",
-      "    { sku: 'lamp', unitCents: 1200, quantity: 2 },",
-      "  ],",
-      "}, config);",
-      "",
-      "assert.deepEqual(summary, {",
-      "  id: 'provider_repair_1',",
-      "  subtotalCents: 5600,",
-      "  shippingCents: 0,",
-      "  taxCents: 448,",
-      "  grandTotalCents: 6048,",
-      "});",
-      "console.log('provider repair order summary ok');",
-      "",
-    ].join("\n"),
-    "utf8",
-  );
-  await writeFile(
-    join(workspaceRoot, "package.json"),
-    `${JSON.stringify({
-      scripts: {
-        test: "node tests/order-summary.test.js",
-      },
-    }, null, 2)}\n`,
-    "utf8",
-  );
+async function createRepairTaskFixture(workspaceRoot: string, task: RepairTask): Promise<void> {
+  for (const file of task.files) {
+    const absolutePath = join(workspaceRoot, file.path);
+    await mkdir(dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, file.content, "utf8");
+  }
 }
 
 function createProviderSmokeProbeDefinitions(
@@ -6351,6 +6278,7 @@ function parseProviderRepairBenchmarkRequest(request: string): ProviderRepairBen
   let attempts = 1;
   let json = false;
   let save = false;
+  let task: string | undefined;
 
   while (rest.length > 0) {
     if (rest === "--json" || rest.startsWith("--json ")) {
@@ -6362,6 +6290,36 @@ function parseProviderRepairBenchmarkRequest(request: string): ProviderRepairBen
     if (rest === "--save" || rest.startsWith("--save ")) {
       save = true;
       rest = rest.slice("--save".length).trimStart();
+      continue;
+    }
+
+    if (rest === "--task" || rest.startsWith("--task ")) {
+      const [value, ...remaining] = rest.slice("--task".length).trimStart().split(/\s+/);
+
+      if (!value || !listRepairTaskNames().includes(value)) {
+        return {
+          error: `Unknown repair task: ${value ?? "(none)"}. Available: ${listRepairTaskNames().join(", ")}.`,
+          ok: false,
+        };
+      }
+
+      task = value;
+      rest = remaining.join(" ").trimStart();
+      continue;
+    }
+
+    if (rest.startsWith("--task=")) {
+      const value = rest.slice("--task=".length).trim();
+
+      if (!value || !listRepairTaskNames().includes(value)) {
+        return {
+          error: `Unknown repair task: ${value || "(none)"}. Available: ${listRepairTaskNames().join(", ")}.`,
+          ok: false,
+        };
+      }
+
+      task = value;
+      rest = "";
       continue;
     }
 
@@ -6409,11 +6367,12 @@ function parseProviderRepairBenchmarkRequest(request: string): ProviderRepairBen
     json,
     ok: true,
     save,
+    task,
   };
 }
 
 function formatProviderRepairBenchmarkUsage(): string {
-  return "Usage: /provider-repair [--attempts <1-5>] [--save] [--json]";
+  return "Usage: /provider-repair [--attempts <1-5>] [--task <name>] [--save] [--json]";
 }
 
 function parseProviderProfilesRequest(request: string): ProviderProfilesRequest {
@@ -6964,5 +6923,5 @@ export function formatApprovalFullDetails(request: ToolApprovalRequest): string 
 }
 
 function isPatchApprovalTool(toolName: string): boolean {
-  return toolName === "apply_patch" || toolName === "reverse_patch";
+  return toolName === "apply_patch" || toolName === "reverse_patch" || toolName === "edit";
 }

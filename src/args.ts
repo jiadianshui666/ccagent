@@ -338,7 +338,7 @@ export function formatCliUsage(): string {
     "                            Enable or disable configured MCP servers.",
     "  ccagent --provider <id>   Apply a provider profile (deepseek, moonshot, zhipu, qwen).",
     "  ccagent --no-session     Run without loading or saving session history.",
-    "  ccagent --allow-edits    Auto-approve apply_patch and reverse_patch for this run.",
+    "  ccagent --allow-edits    Auto-approve apply_patch, reverse_patch, and edit for this run.",
     "  ccagent --sandbox        Run shell commands inside a Docker container for this run.",
     "  ccagent --sandbox=mode   Sandbox mode: docker, podman, job (Windows), timeout (POSIX), or off.",
     "  ccagent --verify <cmd>   Run a verification command after a successful patch.",

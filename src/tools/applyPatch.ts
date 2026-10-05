@@ -7,6 +7,11 @@ import type { Tool, ToolContext, ToolResult } from "./types.js";
 const MAX_PATCH_BYTES = 128 * 1024;
 const MAX_PROCESS_OUTPUT_BYTES = 64 * 1024;
 const MAX_SNAPSHOT_FILE_BYTES = 512 * 1024;
+const PATCH_FALLBACK_FLAGS: readonly string[][] = [
+  ["--recount"],
+  ["--ignore-whitespace"],
+  ["--recount", "--ignore-whitespace"],
+];
 
 export class ApplyPatchTool implements Tool {
   readonly name = "apply_patch";
@@ -94,7 +99,7 @@ export class ReversePatchTool implements Tool {
   }
 }
 
-async function applyPatch(
+export async function applyPatch(
   input: Record<string, unknown>,
   context: ToolContext,
   mode: "apply" | "reverse",
@@ -134,25 +139,42 @@ async function applyPatch(
   }
 
   const modeArgs = mode === "reverse" ? ["--reverse"] : [];
-  const check = await runGitApply(
+  const firstCheck = await runGitApply(
     ["--check", "--whitespace=nowarn", ...modeArgs, "-"],
     patch,
     workspaceRoot,
   );
 
-  if (check.exitCode !== 0) {
-    return {
-      ok: false,
-      error: formatGitApplyFailure(
-        mode === "reverse" ? "Reverse patch check failed" : "Patch check failed",
-        check,
-        paths,
-      ),
-    };
+  let applyFlags: string[] = [];
+
+  if (firstCheck.exitCode !== 0) {
+    for (const flags of PATCH_FALLBACK_FLAGS) {
+      const resumedCheck = await runGitApply(
+        ["--check", "--whitespace=nowarn", ...flags, ...modeArgs, "-"],
+        patch,
+        workspaceRoot,
+      );
+
+      if (resumedCheck.exitCode === 0) {
+        applyFlags = [...flags];
+        break;
+      }
+    }
+
+    if (applyFlags.length === 0) {
+      return {
+        ok: false,
+        error: formatGitApplyFailure(
+          mode === "reverse" ? "Reverse patch check failed" : "Patch check failed",
+          firstCheck,
+          paths,
+        ),
+      };
+    }
   }
 
   const snapshot = await createPreEditSnapshot(workspaceRoot, patch, paths, mode);
-  const applied = await runGitApply(["--whitespace=nowarn", ...modeArgs, "-"], patch, workspaceRoot);
+  const applied = await runGitApply(["--whitespace=nowarn", ...applyFlags, ...modeArgs, "-"], patch, workspaceRoot);
 
   if (applied.exitCode !== 0) {
     return {

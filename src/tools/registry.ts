@@ -4,6 +4,7 @@ import {
   ContextIndexStatusTool,
   SearchContextIndexTool,
 } from "./contextIndex.js";
+import { EditTool } from "./edit.js";
 import { GitDiffTool } from "./gitDiff.js";
 import { GitStatusTool } from "./gitStatus.js";
 import { ListFilesTool } from "./listFiles.js";
@@ -119,6 +120,7 @@ export function createDefaultToolRegistry(
     }),
     new ApplyPatchTool(),
     new ReversePatchTool(),
+    new EditTool(),
     new RestorePatchSnapshotTool(),
     new GitStatusTool(),
     new GitDiffTool(),

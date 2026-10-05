@@ -114,18 +114,17 @@ function getBaseToolRisk(
     };
   }
 
-  if (toolName === "apply_patch" || toolName === "reverse_patch" || toolName === "restore_patch_snapshot") {
+  if (
+    toolName === "apply_patch" ||
+    toolName === "reverse_patch" ||
+    toolName === "edit" ||
+    toolName === "restore_patch_snapshot"
+  ) {
     return {
       risk: "high",
       reasons: [
-        toolName === "reverse_patch"
-          ? "tool can reverse file changes in the workspace"
-          : toolName === "restore_patch_snapshot"
-            ? "tool can restore or delete files in the workspace"
-            : "tool can modify files in the workspace",
-        toolName === "restore_patch_snapshot"
-          ? formatRestorePathReason(input.path)
-          : formatPatchSizeReason(input.patch),
+        formatWorkspaceWriteReason(toolName),
+        formatWorkspaceWriteDetail(toolName, input),
       ].filter(Boolean),
       workspaceImpact: "workspace-write",
     };
@@ -155,6 +154,44 @@ function formatToolPreflightSummary(
   workspaceImpact: ToolWorkspaceImpact,
 ): string {
   return `${toolName} risk=${risk} impact=${workspaceImpact}`;
+}
+
+function formatWorkspaceWriteReason(toolName: string): string {
+  if (toolName === "reverse_patch") {
+    return "tool can reverse file changes in the workspace";
+  }
+
+  if (toolName === "restore_patch_snapshot") {
+    return "tool can restore or delete files in the workspace";
+  }
+
+  return "tool can modify files in the workspace";
+}
+
+function formatWorkspaceWriteDetail(toolName: string, input: Record<string, unknown>): string {
+  if (toolName === "restore_patch_snapshot") {
+    return formatRestorePathReason(input.path);
+  }
+
+  if (toolName === "edit") {
+    return formatEditPathReason(input.path);
+  }
+
+  return formatPatchSizeReason(input.patch);
+}
+
+function formatEditPathReason(value: unknown): string {
+  if (typeof value !== "string") {
+    return "edit path input is missing or invalid";
+  }
+
+  const path = value.trim();
+
+  if (path.length === 0) {
+    return "edit path is empty";
+  }
+
+  return `edit path: ${truncate(path, 160)}`;
 }
 
 function formatRestorePathReason(value: unknown): string {
