@@ -11,6 +11,7 @@ import {
 } from "./model.js";
 import {
   addUsageRecord,
+  addUsageStats,
   createUsageStats,
   formatAggregateCost,
   formatUsageBudget,
@@ -91,6 +92,7 @@ import {
 export type AgentResponse = {
   content: string;
   streamed?: boolean;
+  usage?: UsageStats;
 };
 
 export type AgentStreamEvent =
@@ -290,6 +292,10 @@ export class Agent {
       messages: this.conversation.snapshot(),
       plan: this.plan,
     };
+  }
+
+  snapshotUsage(): UsageStats {
+    return { ...this.usageTotals };
   }
 
   async handleUserMessage(
@@ -597,6 +603,7 @@ export class Agent {
         return {
           content,
           streamed,
+          usage: this.snapshotUsage(),
         };
       }
 
@@ -726,6 +733,7 @@ export class Agent {
     return {
       content,
       streamed,
+      usage: this.snapshotUsage(),
     };
   }
 
@@ -1445,14 +1453,18 @@ export class Agent {
       this.workspaceRoot,
       this.approveTool,
       this.debug,
+      undefined,
+      undefined,
+      this.auditLogger,
     );
     const response = await child.handleUserMessage(buildSubagentPrompt(prompt));
     this.adoptSubagentPatch(child);
+    this.adoptSubagentUsage(child);
     return response.content;
   }
 
   private async runSubagents(prompts: string[]): Promise<string[]> {
-    return Promise.all(
+    const children = await Promise.all(
       prompts.map(async (prompt) => {
         const childModel = this.model.createChild?.() ?? this.model;
         const child = new Agent(
@@ -1461,11 +1473,20 @@ export class Agent {
           this.workspaceRoot,
           this.approveTool,
           this.debug,
+          undefined,
+          undefined,
+          this.auditLogger,
         );
         const response = await child.handleUserMessage(buildSubagentPrompt(prompt));
-        return response.content;
+        return { child, content: response.content };
       }),
     );
+
+    for (const { child } of children) {
+      this.adoptSubagentUsage(child);
+    }
+
+    return children.map(({ content }) => content);
   }
 
   private adoptSubagentPatch(child: Agent): void {
@@ -1478,6 +1499,16 @@ export class Agent {
     this.lastPatch = lastPatch;
     this.taskState = recordTaskPatch(this.taskState, lastPatch);
     this.debug("subagent.patch_adopted", { paths: lastPatch.paths });
+  }
+
+  private adoptSubagentUsage(child: Agent): void {
+    const usage = child.snapshotUsage();
+
+    addUsageStats(this.usageTotals, usage);
+    this.debug("subagent.usage_adopted", {
+      turns: usage.turns,
+      totalTokens: usage.totalTokens,
+    });
   }
 
   private async executeTool(

@@ -1396,6 +1396,19 @@ export function addUsageRecord(stats: UsageStats, record: UsageRecord): void {
   }
 }
 
+export function addUsageStats(target: UsageStats, source: UsageStats): void {
+  target.cachedInputTokens += source.cachedInputTokens;
+  target.costInputTokens += source.costInputTokens;
+  target.costOutputTokens += source.costOutputTokens;
+  target.costedTurns += source.costedTurns;
+  target.estimatedTurns += source.estimatedTurns;
+  target.inputTokens += source.inputTokens;
+  target.outputTokens += source.outputTokens;
+  target.totalTokens += source.totalTokens;
+  target.turns += source.turns;
+  target.turnsWithUsage += source.turnsWithUsage;
+}
+
 function collectToolCallSummary(events: ToolAuditEvent[]): ToolCallSummary {
   const calls = new Map<string, ToolCallAggregate>();
   let legacyCounter = 0;

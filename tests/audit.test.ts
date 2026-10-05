@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  addUsageStats,
+  createUsageStats,
   exportAuditData,
   exportAuditReport,
   FileAuditLogger,
@@ -1808,4 +1810,49 @@ test("Agent audits approval decisions", async () => {
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }
+});
+
+test("addUsageStats merges every usage aggregate field", () => {
+  const target = createUsageStats();
+  Object.assign(target, {
+    cachedInputTokens: 2,
+    costInputTokens: 10,
+    costOutputTokens: 5,
+    costedTurns: 1,
+    estimatedTurns: 1,
+    inputTokens: 10,
+    outputTokens: 5,
+    totalTokens: 15,
+    turns: 1,
+    turnsWithUsage: 1,
+  });
+
+  const source = createUsageStats();
+  Object.assign(source, {
+    cachedInputTokens: 20,
+    costInputTokens: 100,
+    costOutputTokens: 50,
+    costedTurns: 1,
+    estimatedTurns: 1,
+    inputTokens: 100,
+    outputTokens: 50,
+    totalTokens: 150,
+    turns: 1,
+    turnsWithUsage: 1,
+  });
+
+  addUsageStats(target, source);
+
+  assert.deepEqual(target, {
+    cachedInputTokens: 22,
+    costInputTokens: 110,
+    costOutputTokens: 55,
+    costedTurns: 2,
+    estimatedTurns: 2,
+    inputTokens: 110,
+    outputTokens: 55,
+    totalTokens: 165,
+    turns: 2,
+    turnsWithUsage: 2,
+  });
 });
