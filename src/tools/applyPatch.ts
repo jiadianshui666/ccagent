@@ -59,7 +59,22 @@ export class ReversePatchTool implements Tool {
     properties: {
       patch: {
         type: "string",
-        description: "Unified diff patch to reverse inside the workspace.",
+        description: [
+          "Unified diff patch to reverse for one or more workspace files. Use the standard git diff format so `git apply --reverse` accepts it:",
+          "start each file with a `diff --git a/<path> b/<path>` header, then `--- a/<path>` and `+++ b/<path>` file headers,",
+          "then one or more `@@ -<oldStart>,<oldCount> +<newStart>,<newCount> @@` hunk headers, then the changed lines",
+          "(context lines unprefixed, `-` for removed lines, `+` for added lines). The hunk line counts must match the actual",
+          "context/removed/added lines or the patch is rejected. Example for a one-line change:",
+          "diff --git a/src/domain/orders.js b/src/domain/orders.js",
+          "--- a/src/domain/orders.js",
+          "+++ b/src/domain/orders.js",
+          "@@ -3,6 +3,6 @@",
+          "   const subtotalCents = order.items.reduce(",
+          "-    (sum, item) => sum + item.unitCents,",
+          "+    (sum, item) => sum + item.unitCents * item.quantity,",
+          "     0,",
+          "   );",
+        ].join("\n"),
       },
     },
     required: ["patch"],
