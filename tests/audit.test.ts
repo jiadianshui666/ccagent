@@ -24,7 +24,7 @@ import {
   type ToolAuditEvent,
 } from "../src/audit.js";
 import { Agent } from "../src/agent.js";
-import { MockModelClient } from "../src/model.js";
+import { MockModelClient, type ModelClient, type ModelResult, type ModelTurnInput } from "../src/model.js";
 
 class MemoryAuditLogger implements AuditLogger {
   readonly events: ToolAuditEvent[] = [];
@@ -1855,4 +1855,145 @@ test("addUsageStats merges every usage aggregate field", () => {
     turns: 2,
     turnsWithUsage: 2,
   });
+});
+
+class NestedChildModel implements ModelClient {
+  readonly name = "nested-child";
+
+  async createTurn(input: ModelTurnInput): Promise<ModelResult> {
+    if (input.toolOutputs && input.toolOutputs.length > 0) {
+      return { content: "child done", toolCalls: [] };
+    }
+
+    return {
+      content: "",
+      toolCalls: [
+        {
+          callId: "child-list",
+          name: "list_files",
+          arguments: { path: ".", maxDepth: 1 },
+          rawArguments: JSON.stringify({ path: ".", maxDepth: 1 }),
+        },
+      ],
+    };
+  }
+}
+
+class NestedHostModel implements ModelClient {
+  readonly name = "nested-host";
+
+  async createTurn(input: ModelTurnInput): Promise<ModelResult> {
+    if (input.toolOutputs && input.toolOutputs.length > 0) {
+      return { content: "host done", toolCalls: [] };
+    }
+
+    return {
+      content: "",
+      toolCalls: [
+        {
+          callId: "host-delegate",
+          name: "run_subagent",
+          arguments: { prompt: "inspect" },
+          rawArguments: JSON.stringify({ prompt: "inspect" }),
+        },
+      ],
+    };
+  }
+
+  createChild(): ModelClient {
+    return new NestedChildModel();
+  }
+}
+
+test("Agent tags subagent audit events with a nested depth", async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-audit-nested-"));
+  const audit = new MemoryAuditLogger();
+
+  try {
+    await writeFile(join(workspaceRoot, "sample.txt"), "hello\n", "utf8");
+
+    const agent = new Agent(
+      new NestedHostModel(),
+      undefined,
+      workspaceRoot,
+      async () => true,
+      undefined,
+      undefined,
+      {},
+      audit,
+    );
+
+    await agent.handleUserMessage("delegate an inspection");
+
+    const parentToolEvents = audit.events.filter(
+      (event): event is Extract<ToolAuditEvent, { type: "tool_preflight" | "tool_start" | "tool_finish" }> =>
+        (event.type === "tool_preflight" || event.type === "tool_start" || event.type === "tool_finish") &&
+        event.toolName === "run_subagent",
+    );
+    const childToolEvents = audit.events.filter(
+      (event): event is Extract<ToolAuditEvent, { type: "tool_preflight" | "tool_start" | "tool_finish" }> =>
+        (event.type === "tool_preflight" || event.type === "tool_start" || event.type === "tool_finish") &&
+        event.toolName === "list_files",
+    );
+
+    assert.ok(parentToolEvents.length >= 3);
+    assert.ok(childToolEvents.length >= 3);
+    assert.ok(parentToolEvents.every((event) => event.depth === undefined));
+    assert.ok(childToolEvents.every((event) => event.depth === 1));
+
+    const childModelTurns = audit.events.filter(
+      (event) => event.type === "model_turn" && event.modelName === "nested-child",
+    );
+    assert.ok(childModelTurns.length >= 1);
+    assert.ok(childModelTurns.every((event) => event.type === "model_turn" && event.depth === 1));
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test("audit views indent nested events by depth", async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-audit-nested-fmt-"));
+
+  try {
+    const logger = new FileAuditLogger(workspaceRoot);
+    await logger.record({
+      type: "tool_start",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      callId: "parent",
+      toolName: "run_subagent",
+      inputSummary: "delegate",
+    });
+    await logger.record({
+      type: "tool_start",
+      timestamp: "2026-01-01T00:00:01.000Z",
+      callId: "child",
+      depth: 1,
+      toolName: "list_files",
+      inputSummary: "list .",
+    });
+    await logger.record({
+      type: "tool_finish",
+      timestamp: "2026-01-01T00:00:02.000Z",
+      callId: "child",
+      depth: 1,
+      toolName: "list_files",
+      ok: true,
+      summary: "ok",
+    });
+    await logger.record({
+      type: "tool_finish",
+      timestamp: "2026-01-01T00:00:03.000Z",
+      callId: "parent",
+      toolName: "run_subagent",
+      ok: true,
+      summary: "ok",
+    });
+
+    const timeline = await formatAuditTimeline(workspaceRoot);
+
+    assert.match(timeline, /^1\. tool run_subagent/m);
+    assert.match(timeline, /^2\.   tool list_files/m);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
 });

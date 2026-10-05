@@ -7,6 +7,7 @@ export type ToolAuditEvent =
       type: "tool_preflight";
       timestamp: string;
       callId?: string;
+      depth?: number;
       toolName: string;
       risk: "low" | "medium" | "high";
       workspaceImpact: "read-only" | "plan-only" | "workspace-write" | "shell" | "unknown";
@@ -19,6 +20,7 @@ export type ToolAuditEvent =
       type: "tool_start";
       timestamp: string;
       callId?: string;
+      depth?: number;
       toolName: string;
       inputSummary: string;
     }
@@ -26,6 +28,7 @@ export type ToolAuditEvent =
       type: "tool_approval";
       timestamp: string;
       callId?: string;
+      depth?: number;
       toolName: string;
       status: "required" | "approved" | "denied";
     }
@@ -33,6 +36,7 @@ export type ToolAuditEvent =
       type: "tool_finish";
       timestamp: string;
       callId?: string;
+      depth?: number;
       toolName: string;
       ok: boolean;
       summary: string;
@@ -61,6 +65,7 @@ export type ToolAuditEvent =
       responseId?: string;
       round: number;
       streamedText: boolean;
+      depth?: number;
       toolCalls: string[];
       usageEstimated?: boolean;
       inputTokens?: number;
@@ -802,6 +807,7 @@ type ToolCallTimelineItem = {
   approvalDenied: number;
   approvalRequired: number;
   callId?: string;
+  depth?: number;
   eventCount: number;
   finishedAt?: string;
   inputSummary?: string;
@@ -950,11 +956,13 @@ function parseToolAuditEvent(value: unknown): ToolAuditEvent | null {
     value.reasons.every((reason) => typeof reason === "string")
   ) {
     const callId = parseOptionalString(value.callId);
+    const depth = parseOptionalNonNegativeInteger(value.depth);
 
     return {
       type: "tool_preflight",
       timestamp: value.timestamp,
       ...(callId ? { callId } : {}),
+      ...(depth !== undefined ? { depth } : {}),
       toolName: value.toolName,
       risk: value.risk,
       workspaceImpact: value.workspaceImpact,
@@ -972,11 +980,13 @@ function parseToolAuditEvent(value: unknown): ToolAuditEvent | null {
     typeof value.inputSummary === "string"
   ) {
     const callId = parseOptionalString(value.callId);
+    const depth = parseOptionalNonNegativeInteger(value.depth);
 
     return {
       type: "tool_start",
       timestamp: value.timestamp,
       ...(callId ? { callId } : {}),
+      ...(depth !== undefined ? { depth } : {}),
       toolName: value.toolName,
       inputSummary: value.inputSummary,
     };
@@ -989,11 +999,13 @@ function parseToolAuditEvent(value: unknown): ToolAuditEvent | null {
     (value.status === "required" || value.status === "approved" || value.status === "denied")
   ) {
     const callId = parseOptionalString(value.callId);
+    const depth = parseOptionalNonNegativeInteger(value.depth);
 
     return {
       type: "tool_approval",
       timestamp: value.timestamp,
       ...(callId ? { callId } : {}),
+      ...(depth !== undefined ? { depth } : {}),
       toolName: value.toolName,
       status: value.status,
     };
@@ -1007,11 +1019,13 @@ function parseToolAuditEvent(value: unknown): ToolAuditEvent | null {
     typeof value.summary === "string"
   ) {
     const callId = parseOptionalString(value.callId);
+    const depth = parseOptionalNonNegativeInteger(value.depth);
 
     return {
       type: "tool_finish",
       timestamp: value.timestamp,
       ...(callId ? { callId } : {}),
+      ...(depth !== undefined ? { depth } : {}),
       toolName: value.toolName,
       ok: value.ok,
       summary: value.summary,
@@ -1068,6 +1082,7 @@ function parseToolAuditEvent(value: unknown): ToolAuditEvent | null {
     const outputTokens = parseOptionalNonNegativeInteger(value.outputTokens);
     const totalTokens = parseOptionalNonNegativeInteger(value.totalTokens);
     const cachedInputTokens = parseOptionalNonNegativeInteger(value.cachedInputTokens);
+    const depth = parseOptionalNonNegativeInteger(value.depth);
 
     return {
       type: "model_turn",
@@ -1080,6 +1095,7 @@ function parseToolAuditEvent(value: unknown): ToolAuditEvent | null {
       ...(responseId ? { responseId } : {}),
       round: value.round,
       streamedText: value.streamedText,
+      ...(depth !== undefined ? { depth } : {}),
       toolCalls: value.toolCalls,
       ...(value.usageEstimated === true ? { usageEstimated: true } : {}),
       ...(inputTokens !== undefined ? { inputTokens } : {}),
@@ -1093,67 +1109,81 @@ function parseToolAuditEvent(value: unknown): ToolAuditEvent | null {
 }
 
 function formatAuditEventLine(event: ToolAuditEvent): string {
+  const prefix = formatDepthPrefix(eventDepth(event));
+
   if (event.type === "tool_preflight") {
-    return `${event.timestamp} preflight ${event.toolName}${formatCallId(event.callId)} risk=${event.risk} impact=${event.workspaceImpact} approval=${event.requiresApproval ? "yes" : "no"} denied=${event.deniedByPolicy ? "yes" : "no"} ${truncate(event.reasons.join("; "))}`;
+    return `${prefix}${event.timestamp} preflight ${event.toolName}${formatCallId(event.callId)} risk=${event.risk} impact=${event.workspaceImpact} approval=${event.requiresApproval ? "yes" : "no"} denied=${event.deniedByPolicy ? "yes" : "no"} ${truncate(event.reasons.join("; "))}`;
   }
 
   if (event.type === "tool_start") {
-    return `${event.timestamp} start    ${event.toolName}${formatCallId(event.callId)} input=${truncate(event.inputSummary)}`;
+    return `${prefix}${event.timestamp} start    ${event.toolName}${formatCallId(event.callId)} input=${truncate(event.inputSummary)}`;
   }
 
   if (event.type === "tool_approval") {
-    return `${event.timestamp} approval ${event.toolName}${formatCallId(event.callId)} status=${event.status}`;
+    return `${prefix}${event.timestamp} approval ${event.toolName}${formatCallId(event.callId)} status=${event.status}`;
   }
 
   if (event.type === "project_command") {
-    return `${event.timestamp} command  ${event.action} ${event.commandName} status=${event.status} requested=${event.requestedName} ${formatProjectCommandAuditFields(event)} ${truncate(event.summary)}`;
+    return `${prefix}${event.timestamp} command  ${event.action} ${event.commandName} status=${event.status} requested=${event.requestedName} ${formatProjectCommandAuditFields(event)} ${truncate(event.summary)}`;
   }
 
   if (event.type === "model_turn") {
-    return `${event.timestamp} model   ${event.kind} round=${event.round} duration=${event.durationMs}ms content=${event.contentLength} ${formatTokenUsage(event)} toolCalls=${formatToolCallList(event.toolCalls)} responseId=${event.responseId ?? "(none)"}`;
+    return `${prefix}${event.timestamp} model   ${event.kind} round=${event.round} duration=${event.durationMs}ms content=${event.contentLength} ${formatTokenUsage(event)} toolCalls=${formatToolCallList(event.toolCalls)} responseId=${event.responseId ?? "(none)"}`;
   }
 
-  return `${event.timestamp} finish   ${event.toolName}${formatCallId(event.callId)} ${event.ok ? "ok" : "failed"} ${truncate(
+  return `${prefix}${event.timestamp} finish   ${event.toolName}${formatCallId(event.callId)} ${event.ok ? "ok" : "failed"} ${truncate(
     event.summary,
   )}`;
 }
 
 function formatAuditReplayLine(event: ToolAuditEvent): string {
+  const prefix = formatDepthPrefix(eventDepth(event));
+
   if (event.type === "tool_preflight") {
-    return `${event.timestamp} tool ${event.toolName}${formatCallId(event.callId)} preflight risk=${event.risk} impact=${event.workspaceImpact} approval=${event.requiresApproval ? "yes" : "no"} denied=${event.deniedByPolicy ? "yes" : "no"} reasons=${truncate(event.reasons.join("; "))}`;
+    return `${prefix}${event.timestamp} tool ${event.toolName}${formatCallId(event.callId)} preflight risk=${event.risk} impact=${event.workspaceImpact} approval=${event.requiresApproval ? "yes" : "no"} denied=${event.deniedByPolicy ? "yes" : "no"} reasons=${truncate(event.reasons.join("; "))}`;
   }
 
   if (event.type === "tool_start") {
-    return `${event.timestamp} tool ${event.toolName}${formatCallId(event.callId)} started with input=${truncate(
+    return `${prefix}${event.timestamp} tool ${event.toolName}${formatCallId(event.callId)} started with input=${truncate(
       event.inputSummary,
     )}`;
   }
 
   if (event.type === "tool_approval") {
-    return `${event.timestamp} tool ${event.toolName}${formatCallId(event.callId)} approval ${event.status}`;
+    return `${prefix}${event.timestamp} tool ${event.toolName}${formatCallId(event.callId)} approval ${event.status}`;
   }
 
   if (event.type === "project_command") {
-    return `${event.timestamp} project command ${event.commandName} ${event.action} ${event.status} requested=${event.requestedName} ${formatProjectCommandAuditFields(event)} summary=${truncate(event.summary)}`;
+    return `${prefix}${event.timestamp} project command ${event.commandName} ${event.action} ${event.status} requested=${event.requestedName} ${formatProjectCommandAuditFields(event)} summary=${truncate(event.summary)}`;
   }
 
   if (event.type === "model_turn") {
-    return `${event.timestamp} model turn ${event.kind} round=${event.round} model=${event.modelName} duration=${event.durationMs}ms contentLength=${event.contentLength} ${formatTokenUsage(event)} toolCalls=${formatToolCallList(event.toolCalls)} responseId=${event.responseId ?? "(none)"}`;
+    return `${prefix}${event.timestamp} model turn ${event.kind} round=${event.round} model=${event.modelName} duration=${event.durationMs}ms contentLength=${event.contentLength} ${formatTokenUsage(event)} toolCalls=${formatToolCallList(event.toolCalls)} responseId=${event.responseId ?? "(none)"}`;
   }
 
-  return `${event.timestamp} tool ${event.toolName}${formatCallId(event.callId)} finished ${event.ok ? "ok" : "failed"} summary=${truncate(
+  return `${prefix}${event.timestamp} tool ${event.toolName}${formatCallId(event.callId)} finished ${event.ok ? "ok" : "failed"} summary=${truncate(
     event.summary,
   )}`;
 }
 
 function formatModelTurnLine(event: Extract<ToolAuditEvent, { type: "model_turn" }>): string {
-  return `${event.timestamp} ${event.kind.padEnd(12)} round=${event.round} model=${event.modelName} duration=${event.durationMs}ms content=${event.contentLength} streamed=${event.streamedText ? "yes" : "no"} ${formatTokenUsage(event)} ${formatEstimatedCost(event)} previous=${event.previousResponseId ?? "(none)"} response=${event.responseId ?? "(none)"} toolCalls=${formatToolCallList(event.toolCalls)}`;
+  const prefix = formatDepthPrefix(event.depth ?? 0);
+
+  return `${prefix}${event.timestamp} ${event.kind.padEnd(12)} round=${event.round} model=${event.modelName} duration=${event.durationMs}ms content=${event.contentLength} streamed=${event.streamedText ? "yes" : "no"} ${formatTokenUsage(event)} ${formatEstimatedCost(event)} previous=${event.previousResponseId ?? "(none)"} response=${event.responseId ?? "(none)"} toolCalls=${formatToolCallList(event.toolCalls)}`;
 }
 
 function formatProjectCommandEventLine(
   event: Extract<ToolAuditEvent, { type: "project_command" }>,
 ): string {
   return `${event.timestamp} ${event.action.padEnd(7)} ${event.commandName} status=${event.status} requested=${event.requestedName} ${formatProjectCommandAuditFields(event)} ${truncate(event.summary)}`;
+}
+
+function formatDepthPrefix(depth: number): string {
+  return depth > 0 ? "  ".repeat(depth) : "";
+}
+
+function eventDepth(event: ToolAuditEvent): number {
+  return "depth" in event && typeof event.depth === "number" ? event.depth : 0;
 }
 
 function collectAuditTimelineItems(events: ToolAuditEvent[]): AuditTimelineItem[] {
@@ -1189,6 +1219,7 @@ function collectAuditTimelineItems(events: ToolAuditEvent[]): AuditTimelineItem[
         approvalDenied: 0,
         approvalRequired: 0,
         ...(callId ? { callId } : {}),
+        depth: event.depth ?? 0,
         eventCount: 0,
         kind: "tool_call",
         lastTimestamp: event.timestamp,
@@ -1203,6 +1234,10 @@ function collectAuditTimelineItems(events: ToolAuditEvent[]): AuditTimelineItem[
 
     current.eventCount += 1;
     current.toolName = event.toolName || current.toolName;
+
+    if (event.depth !== undefined) {
+      current.depth = event.depth;
+    }
 
     if (event.timestamp >= current.lastTimestamp) {
       current.lastTimestamp = event.timestamp;
@@ -1246,7 +1281,7 @@ function formatAuditTimelineItem(item: AuditTimelineItem): string {
   const status = item.finishedAt === undefined ? "pending" : item.ok ? "succeeded" : "failed";
   const duration = formatDuration(item.startedAt, item.finishedAt);
   const parts = [
-    `tool ${item.toolName}${formatCallId(item.callId)}`,
+    `${formatDepthPrefix(item.depth ?? 0)}tool ${item.toolName}${formatCallId(item.callId)}`,
     status,
     `duration=${duration}`,
     `events=${item.eventCount}`,

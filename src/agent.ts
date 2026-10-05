@@ -232,6 +232,7 @@ export class Agent {
   private automaticContextLastRefreshAt = 0;
   private readonly usageTotals: UsageStats = createUsageStats();
   private readonly writtenPaths = new Set<string>();
+  private depth = 0;
 
   constructor(
     private readonly model: ModelClient = createModelClient(),
@@ -301,6 +302,10 @@ export class Agent {
 
   snapshotWrittenPaths(): string[] {
     return [...this.writtenPaths].sort();
+  }
+
+  setTraceDepth(depth: number): void {
+    this.depth = Math.max(0, Math.floor(depth));
   }
 
   async handleUserMessage(
@@ -1462,6 +1467,7 @@ export class Agent {
       undefined,
       this.auditLogger,
     );
+    child.setTraceDepth(this.depth + 1);
     const response = await child.handleUserMessage(buildSubagentPrompt(prompt));
     this.adoptSubagentPatch(child);
     this.adoptSubagentUsage(child);
@@ -1486,6 +1492,7 @@ export class Agent {
           undefined,
           this.auditLogger,
         );
+        child.setTraceDepth(this.depth + 1);
         const response = await child.handleUserMessage(buildSubagentPrompt(prompt));
         return { child, content: response.content };
       }),
@@ -3453,6 +3460,7 @@ export class Agent {
     try {
       await this.auditLogger.record({
         timestamp: new Date().toISOString(),
+        ...(this.depth > 0 ? { depth: this.depth } : {}),
         ...event,
       });
     } catch (error) {
