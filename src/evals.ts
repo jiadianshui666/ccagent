@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -9,6 +11,7 @@ import { MockModelClient, type ModelClient, type ModelResult, type ModelTurnInpu
 import { buildSemanticIndex } from "./semanticIndex.js";
 import { prepareAutomaticTaskContext } from "./taskContext.js";
 import { createDefaultToolRegistry } from "./tools/registry.js";
+import { fetchWebPage, searchWeb } from "./web.js";
 
 const execFileAsync = promisify(execFile);
 const BENCHMARK_ITERATIONS = 3;
@@ -43,6 +46,8 @@ export const OFFLINE_EVAL_CASE_NAMES = [
   "verification_failure_strategies",
   "verification_environment_failures",
   "verification_flaky_guard",
+  "web_fetch",
+  "web_search",
 ] as const;
 export type OfflineEvalCaseName = (typeof OFFLINE_EVAL_CASE_NAMES)[number];
 export const OFFLINE_EVAL_CASE_TAG_NAMES = [
@@ -57,6 +62,7 @@ export const OFFLINE_EVAL_CASE_TAG_NAMES = [
   "state",
   "tool",
   "verification",
+  "web",
   "workspace",
 ] as const;
 export type OfflineEvalCaseTag = (typeof OFFLINE_EVAL_CASE_TAG_NAMES)[number];
@@ -213,6 +219,8 @@ const OFFLINE_EVAL_SUITE_CASES: Record<Exclude<OfflineEvalSuiteName, "benchmark"
     "verification_failure_strategies",
     "verification_environment_failures",
     "verification_flaky_guard",
+    "web_fetch",
+    "web_search",
   ],
 };
 
@@ -243,6 +251,8 @@ const OFFLINE_EVAL_CASE_RUNNERS: Record<OfflineEvalCaseName, () => Promise<strin
   verification_failure_strategies: evalVerificationFailureStrategies,
   verification_environment_failures: evalVerificationEnvironmentFailures,
   verification_flaky_guard: evalVerificationFlakyGuard,
+  web_fetch: evalWebFetch,
+  web_search: evalWebSearch,
   workspace_info: evalWorkspaceInfo,
 };
 
@@ -273,6 +283,8 @@ const OFFLINE_EVAL_CASE_DESCRIPTIONS: Record<OfflineEvalCaseName, string> = {
   verification_failure_strategies: "Checks repair strategies for TypeScript, Node test, and npm script failures.",
   verification_environment_failures: "Diagnoses missing environment variables, port conflicts, network failures, and missing system commands before source repair.",
   verification_flaky_guard: "Classifies mixed verification outcomes as flaky and blocks automated source repair.",
+  web_fetch: "Fetches a local HTML page and converts it to readable plain text with the title extracted.",
+  web_search: "Parses DuckDuckGo result HTML into titled, snippet-bearing results with redirect URLs decoded.",
   workspace_info: "Summarizes workspace markers through the workspace_info tool.",
 };
 
@@ -303,6 +315,8 @@ const OFFLINE_EVAL_CASE_TAGS: Record<OfflineEvalCaseName, OfflineEvalCaseTag[]> 
   verification_failure_strategies: ["diagnostics", "repair", "verification"],
   verification_environment_failures: ["diagnostics", "repair", "safety", "verification"],
   verification_flaky_guard: ["diagnostics", "repair", "safety", "state", "verification"],
+  web_fetch: ["web"],
+  web_search: ["retrieval", "web"],
   workspace_info: ["tool", "workspace"],
 };
 
@@ -1518,6 +1532,73 @@ async function evalReadFile(): Promise<string> {
 
     return "read note.txt through the read_file tool";
   });
+}
+
+type EvalWebHandler = (req: IncomingMessage, res: ServerResponse) => void;
+
+async function withEvalWebServer<T>(
+  handler: EvalWebHandler,
+  run: (baseUrl: string) => Promise<T>,
+): Promise<T> {
+  const server = createServer(handler);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    return await run(baseUrl);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+}
+
+async function evalWebFetch(): Promise<string> {
+  return withEvalWebServer(
+    (req, res) => {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end("<html><head><title>Eval page</title></head><body><h1>Heading</h1><p>Body text.</p></body></html>");
+    },
+    async (baseUrl) => {
+      const page = await fetchWebPage(`${baseUrl}/page`);
+
+      expect(page.title === "Eval page", "expected the page title to be extracted");
+      expect(page.text.includes("Heading"), "expected the body text to include Heading");
+      expect(page.text.includes("Body text."), "expected the body text to include Body text.");
+      expect(page.truncated === false, "expected the short page not to be truncated");
+
+      return "fetched and converted an HTML page to readable plain text";
+    },
+  );
+}
+
+async function evalWebSearch(): Promise<string> {
+  const html = [
+    "<html><body>",
+    '<a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpage">Example Page</a>',
+    '<a class="result__snippet" href="https://example.com/page">A first result snippet.</a>',
+    '<a rel="nofollow" class="result__a" href="https://second.example/other">Second &amp; Page</a>',
+    '<a class="result__snippet" href="https://second.example/other">Second snippet text.</a>',
+    "</body></html>",
+  ].join("");
+
+  return withEvalWebServer(
+    (req, res) => {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(html);
+    },
+    async (baseUrl) => {
+      const results = await searchWeb("eval query", { baseUrl: `${baseUrl}/html/` });
+
+      expect(results.length === 2, "expected two parsed search results");
+      expect(results[0]?.title === "Example Page", "expected the first title to be extracted");
+      expect(results[0]?.url === "https://example.com/page", "expected the redirect URL to be decoded");
+      expect(results[0]?.snippet === "A first result snippet.", "expected the snippet to be extracted");
+
+      return "parsed DuckDuckGo results with redirect URLs decoded";
+    },
+  );
 }
 
 async function evalContextGraphRetrieval(): Promise<string> {

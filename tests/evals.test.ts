@@ -92,7 +92,7 @@ test("listOfflineEvalCases returns discoverable case metadata", () => {
   assert.deepEqual(repairLoop?.suites, ["regression", "benchmark"]);
   assert.deepEqual(repairLoop?.tags, ["editing", "multifile", "patch", "repair", "verification"]);
   assert.match(output, /Offline eval cases/);
-  assert.match(output, /Count: 27/);
+  assert.match(output, /Count: 29/);
   assert.match(output, /- context_graph_retrieval/);
   assert.match(output, /- repair_loop_bad_patch_recovery/);
   assert.match(output, /- repair_loop_wrong_file_recovery/);
@@ -117,14 +117,14 @@ test("listOfflineEvalCases returns discoverable case metadata", () => {
   assert.equal(json.count, OFFLINE_EVAL_CASE_NAMES.length);
   assert.equal(json.cases.some((item) => item.name === "verification_failure_strategies"), true);
   assert.equal(regression.suite, "regression");
-  assert.equal(regression.count, 24);
+  assert.equal(regression.count, 26);
   assert.equal(regression.cases.some((item) => item.name === "list_files"), false);
   assert.equal(regression.cases.some((item) => item.name === "repair_loop_bad_patch_recovery"), true);
   assert.equal(regression.cases.some((item) => item.name === "repair_loop_wrong_file_recovery"), true);
   assert.equal(regression.cases.some((item) => item.name === "repair_loop_partial_multifile_recovery"), true);
   assert.equal(regression.cases.some((item) => item.name === "repair_loop_multifile"), true);
   assert.match(regressionOutput, /Suite: regression/);
-  assert.match(regressionOutput, /Count: 24/);
+  assert.match(regressionOutput, /Count: 26/);
   assert.equal(repair.suite, "regression");
   assert.equal(repair.tag, "repair");
   assert.equal(repair.count, 19);
@@ -160,7 +160,7 @@ test("listOfflineEvalTags returns tag metadata", () => {
   const regression = listOfflineEvalTags("regression");
   const repair = result.tags.find((item) => item.name === "repair");
 
-  assert.equal(result.count, 12);
+  assert.equal(result.count, 13);
   assert.equal(result.tags.some((item) => item.name === "retrieval"), true);
   assert.equal(result.tags.some((item) => item.name === "workspace"), true);
   assert.equal(repair?.count, 19);
@@ -189,11 +189,11 @@ test("listOfflineEvalTags returns tag metadata", () => {
   assert.match(output, /Offline eval tags/);
   assert.match(output, /- repair/);
   assert.match(output, /case names: repair_loop, repair_loop_bad_patch_recovery, repair_loop_wrong_file_recovery, repair_loop_partial_multifile_recovery, repair_loop_multifile, repair_loop_service_contract, repair_loop_renamed_api_contract, repair_loop_stale_import_contract, repair_loop_contract_drift, repair_loop_multi_caller_contract_drift, repair_loop_cascading_dependency_chain, repair_loop_ambiguous_test_signal, repair_loop_large_repo_retrieval, repair_loop_process_cleanup, repair_loop_service_readiness, repair_loop_project_fixture, verification_failure_strategies, verification_environment_failures, verification_flaky_guard/);
-  assert.equal(json.count, 12);
+  assert.equal(json.count, 13);
   assert.equal(json.tags.some((item) => item.name === "diagnostics"), true);
 
   assert.equal(regression.suite, "regression");
-  assert.equal(regression.count, 11);
+  assert.equal(regression.count, 12);
   assert.equal(regression.tags.some((item) => item.name === "retrieval"), true);
   assert.equal(regression.tags.some((item) => item.name === "tool"), false);
   assert.equal(regression.tags.some((item) => item.name === "repair"), true);
@@ -207,7 +207,7 @@ test("runOfflineEvals runs the full regression suite and a configurable benchmar
 
   assert.equal(regression.suite, "regression");
   assert.equal(regression.failed, 0);
-  assert.equal(regression.results.length, 24);
+  assert.equal(regression.results.length, 26);
   assert.equal(regression.results.some((item) => item.name === "context_graph_retrieval"), true);
   assert.equal(regression.results.some((item) => item.name === "plan_update"), true);
   assert.equal(regression.results.some((item) => item.name === "replace_file"), true);
