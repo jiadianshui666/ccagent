@@ -733,7 +733,7 @@ test("CLI runs offline evals without calling the prompt model", async () => {
 
     assert.equal(cases.exitCode, 0);
     assert.match(cases.stdout, /Offline eval cases/);
-    assert.match(cases.stdout, /Count: 27/);
+    assert.match(cases.stdout, /Count: 29/);
     assert.match(cases.stdout, /context_graph_retrieval/);
     assert.match(cases.stdout, /repair_loop_bad_patch_recovery/);
     assert.match(cases.stdout, /repair_loop_wrong_file_recovery/);
@@ -755,7 +755,7 @@ test("CLI runs offline evals without calling the prompt model", async () => {
     assert.match(cases.stdout, /suites: regression, benchmark/);
     assert.equal(casesRegression.exitCode, 0);
     assert.match(casesRegression.stdout, /Suite: regression/);
-    assert.match(casesRegression.stdout, /Count: 24/);
+    assert.match(casesRegression.stdout, /Count: 26/);
     assert.doesNotMatch(casesRegression.stdout, /- list_files/);
     assert.equal(casesRepair.exitCode, 0);
     assert.match(casesRepair.stdout, /Suite: regression/);
@@ -781,7 +781,7 @@ test("CLI runs offline evals without calling the prompt model", async () => {
     assert.doesNotMatch(casesRepair.stdout, /- plan_update/);
     assert.equal(casesJson.exitCode, 0);
     const parsedCases = JSON.parse(casesJson.stdout) as { cases: Array<{ name: string }>; count: number };
-    assert.equal(parsedCases.count, 27);
+    assert.equal(parsedCases.count, 29);
     assert.equal(parsedCases.cases.some((item) => item.name === "context_graph_retrieval"), true);
     assert.equal(parsedCases.cases.some((item) => item.name === "repair_loop_bad_patch_recovery"), true);
     assert.equal(parsedCases.cases.some((item) => item.name === "repair_loop_wrong_file_recovery"), true);
@@ -808,7 +808,7 @@ test("CLI runs offline evals without calling the prompt model", async () => {
     assert.match(tagsRegression.stdout, /- workspace/);
     assert.equal(tagsJson.exitCode, 0);
     const parsedTags = JSON.parse(tagsJson.stdout) as { count: number; tags: Array<{ name: string }> };
-    assert.equal(parsedTags.count, 12);
+    assert.equal(parsedTags.count, 13);
     assert.equal(parsedTags.tags.some((item) => item.name === "retrieval"), true);
     assert.equal(parsedTags.tags.some((item) => item.name === "verification"), true);
 
