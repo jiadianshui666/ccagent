@@ -1997,3 +1997,143 @@ test("audit views indent nested events by depth", async () => {
     await rm(workspaceRoot, { recursive: true, force: true });
   }
 });
+
+class ParallelNestedHostModel implements ModelClient {
+  readonly name = "parallel-nested-host";
+
+  async createTurn(input: ModelTurnInput): Promise<ModelResult> {
+    if (input.toolOutputs && input.toolOutputs.length > 0) {
+      return { content: "host done", toolCalls: [] };
+    }
+
+    return {
+      content: "",
+      toolCalls: [
+        {
+          callId: "host-parallel",
+          name: "run_subagents",
+          arguments: { prompts: ["inspect a", "inspect b"], write: false },
+          rawArguments: JSON.stringify({ prompts: ["inspect a", "inspect b"], write: false }),
+        },
+      ],
+    };
+  }
+
+  createChild(): ModelClient {
+    return new NestedChildModel();
+  }
+}
+
+test("parallel subagents record distinct span ids under a shared parent call", async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-audit-siblings-"));
+  const audit = new MemoryAuditLogger();
+
+  try {
+    await writeFile(join(workspaceRoot, "sample.txt"), "hello\n", "utf8");
+
+    const agent = new Agent(
+      new ParallelNestedHostModel(),
+      undefined,
+      workspaceRoot,
+      async () => true,
+      undefined,
+      undefined,
+      {},
+      audit,
+    );
+
+    await agent.handleUserMessage("delegate two inspections");
+
+    const childToolEvents = audit.events.filter(
+      (event) => isToolExecutionAuditEvent(event) && event.toolName === "list_files",
+    );
+    const spanIds = new Set(childToolEvents.map((event) => event.spanId));
+
+    assert.equal(spanIds.size, 2);
+    assert.ok(childToolEvents.length >= 4);
+    assert.ok(childToolEvents.every((event) => event.depth === 1));
+    assert.ok(childToolEvents.every((event) => event.parentCallId === "host-parallel"));
+
+    const parentToolEvents = audit.events.filter(
+      (event) => isToolExecutionAuditEvent(event) && event.toolName === "run_subagents",
+    );
+    assert.ok(parentToolEvents.length >= 3);
+    assert.ok(
+      parentToolEvents.every((event) => event.spanId === undefined && event.parentCallId === undefined),
+    );
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test("audit timeline distinguishes sibling spans", async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-audit-span-fmt-"));
+
+  try {
+    const logger = new FileAuditLogger(workspaceRoot);
+    await logger.record({
+      type: "tool_start",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      callId: "parent",
+      toolName: "run_subagents",
+      inputSummary: "delegate",
+    });
+    await logger.record({
+      type: "tool_start",
+      timestamp: "2026-01-01T00:00:01.000Z",
+      callId: "child-a",
+      depth: 1,
+      spanId: "subagent-1",
+      parentCallId: "parent",
+      toolName: "list_files",
+      inputSummary: "list a",
+    });
+    await logger.record({
+      type: "tool_finish",
+      timestamp: "2026-01-01T00:00:02.000Z",
+      callId: "child-a",
+      depth: 1,
+      spanId: "subagent-1",
+      parentCallId: "parent",
+      toolName: "list_files",
+      ok: true,
+      summary: "ok",
+    });
+    await logger.record({
+      type: "tool_start",
+      timestamp: "2026-01-01T00:00:03.000Z",
+      callId: "child-b",
+      depth: 1,
+      spanId: "subagent-2",
+      parentCallId: "parent",
+      toolName: "list_files",
+      inputSummary: "list b",
+    });
+    await logger.record({
+      type: "tool_finish",
+      timestamp: "2026-01-01T00:00:04.000Z",
+      callId: "child-b",
+      depth: 1,
+      spanId: "subagent-2",
+      parentCallId: "parent",
+      toolName: "list_files",
+      ok: true,
+      summary: "ok",
+    });
+    await logger.record({
+      type: "tool_finish",
+      timestamp: "2026-01-01T00:00:05.000Z",
+      callId: "parent",
+      toolName: "run_subagents",
+      ok: true,
+      summary: "ok",
+    });
+
+    const timeline = await formatAuditTimeline(workspaceRoot);
+
+    assert.match(timeline, /tool list_files.*span=subagent-1.*parent=parent/);
+    assert.match(timeline, /tool list_files.*span=subagent-2.*parent=parent/);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});

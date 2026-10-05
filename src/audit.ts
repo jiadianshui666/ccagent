@@ -8,6 +8,8 @@ export type ToolAuditEvent =
       timestamp: string;
       callId?: string;
       depth?: number;
+      spanId?: string;
+      parentCallId?: string;
       toolName: string;
       risk: "low" | "medium" | "high";
       workspaceImpact: "read-only" | "plan-only" | "workspace-write" | "shell" | "unknown";
@@ -21,6 +23,8 @@ export type ToolAuditEvent =
       timestamp: string;
       callId?: string;
       depth?: number;
+      spanId?: string;
+      parentCallId?: string;
       toolName: string;
       inputSummary: string;
     }
@@ -29,6 +33,8 @@ export type ToolAuditEvent =
       timestamp: string;
       callId?: string;
       depth?: number;
+      spanId?: string;
+      parentCallId?: string;
       toolName: string;
       status: "required" | "approved" | "denied";
     }
@@ -37,6 +43,8 @@ export type ToolAuditEvent =
       timestamp: string;
       callId?: string;
       depth?: number;
+      spanId?: string;
+      parentCallId?: string;
       toolName: string;
       ok: boolean;
       summary: string;
@@ -66,6 +74,8 @@ export type ToolAuditEvent =
       round: number;
       streamedText: boolean;
       depth?: number;
+      spanId?: string;
+      parentCallId?: string;
       toolCalls: string[];
       usageEstimated?: boolean;
       inputTokens?: number;
@@ -808,6 +818,8 @@ type ToolCallTimelineItem = {
   approvalRequired: number;
   callId?: string;
   depth?: number;
+  spanId?: string;
+  parentCallId?: string;
   eventCount: number;
   finishedAt?: string;
   inputSummary?: string;
@@ -957,12 +969,16 @@ function parseToolAuditEvent(value: unknown): ToolAuditEvent | null {
   ) {
     const callId = parseOptionalString(value.callId);
     const depth = parseOptionalNonNegativeInteger(value.depth);
+    const spanId = parseOptionalString(value.spanId);
+    const parentCallId = parseOptionalString(value.parentCallId);
 
     return {
       type: "tool_preflight",
       timestamp: value.timestamp,
       ...(callId ? { callId } : {}),
       ...(depth !== undefined ? { depth } : {}),
+      ...(spanId ? { spanId } : {}),
+      ...(parentCallId ? { parentCallId } : {}),
       toolName: value.toolName,
       risk: value.risk,
       workspaceImpact: value.workspaceImpact,
@@ -981,12 +997,16 @@ function parseToolAuditEvent(value: unknown): ToolAuditEvent | null {
   ) {
     const callId = parseOptionalString(value.callId);
     const depth = parseOptionalNonNegativeInteger(value.depth);
+    const spanId = parseOptionalString(value.spanId);
+    const parentCallId = parseOptionalString(value.parentCallId);
 
     return {
       type: "tool_start",
       timestamp: value.timestamp,
       ...(callId ? { callId } : {}),
       ...(depth !== undefined ? { depth } : {}),
+      ...(spanId ? { spanId } : {}),
+      ...(parentCallId ? { parentCallId } : {}),
       toolName: value.toolName,
       inputSummary: value.inputSummary,
     };
@@ -1000,12 +1020,16 @@ function parseToolAuditEvent(value: unknown): ToolAuditEvent | null {
   ) {
     const callId = parseOptionalString(value.callId);
     const depth = parseOptionalNonNegativeInteger(value.depth);
+    const spanId = parseOptionalString(value.spanId);
+    const parentCallId = parseOptionalString(value.parentCallId);
 
     return {
       type: "tool_approval",
       timestamp: value.timestamp,
       ...(callId ? { callId } : {}),
       ...(depth !== undefined ? { depth } : {}),
+      ...(spanId ? { spanId } : {}),
+      ...(parentCallId ? { parentCallId } : {}),
       toolName: value.toolName,
       status: value.status,
     };
@@ -1020,12 +1044,16 @@ function parseToolAuditEvent(value: unknown): ToolAuditEvent | null {
   ) {
     const callId = parseOptionalString(value.callId);
     const depth = parseOptionalNonNegativeInteger(value.depth);
+    const spanId = parseOptionalString(value.spanId);
+    const parentCallId = parseOptionalString(value.parentCallId);
 
     return {
       type: "tool_finish",
       timestamp: value.timestamp,
       ...(callId ? { callId } : {}),
       ...(depth !== undefined ? { depth } : {}),
+      ...(spanId ? { spanId } : {}),
+      ...(parentCallId ? { parentCallId } : {}),
       toolName: value.toolName,
       ok: value.ok,
       summary: value.summary,
@@ -1083,6 +1111,8 @@ function parseToolAuditEvent(value: unknown): ToolAuditEvent | null {
     const totalTokens = parseOptionalNonNegativeInteger(value.totalTokens);
     const cachedInputTokens = parseOptionalNonNegativeInteger(value.cachedInputTokens);
     const depth = parseOptionalNonNegativeInteger(value.depth);
+    const spanId = parseOptionalString(value.spanId);
+    const parentCallId = parseOptionalString(value.parentCallId);
 
     return {
       type: "model_turn",
@@ -1096,6 +1126,8 @@ function parseToolAuditEvent(value: unknown): ToolAuditEvent | null {
       round: value.round,
       streamedText: value.streamedText,
       ...(depth !== undefined ? { depth } : {}),
+      ...(spanId ? { spanId } : {}),
+      ...(parentCallId ? { parentCallId } : {}),
       toolCalls: value.toolCalls,
       ...(value.usageEstimated === true ? { usageEstimated: true } : {}),
       ...(inputTokens !== undefined ? { inputTokens } : {}),
@@ -1168,8 +1200,9 @@ function formatAuditReplayLine(event: ToolAuditEvent): string {
 
 function formatModelTurnLine(event: Extract<ToolAuditEvent, { type: "model_turn" }>): string {
   const prefix = formatDepthPrefix(event.depth ?? 0);
+  const span = event.spanId ? ` span=${event.spanId}` : "";
 
-  return `${prefix}${event.timestamp} ${event.kind.padEnd(12)} round=${event.round} model=${event.modelName} duration=${event.durationMs}ms content=${event.contentLength} streamed=${event.streamedText ? "yes" : "no"} ${formatTokenUsage(event)} ${formatEstimatedCost(event)} previous=${event.previousResponseId ?? "(none)"} response=${event.responseId ?? "(none)"} toolCalls=${formatToolCallList(event.toolCalls)}`;
+  return `${prefix}${event.timestamp} ${event.kind.padEnd(12)} round=${event.round} model=${event.modelName}${span} duration=${event.durationMs}ms content=${event.contentLength} streamed=${event.streamedText ? "yes" : "no"} ${formatTokenUsage(event)} ${formatEstimatedCost(event)} previous=${event.previousResponseId ?? "(none)"} response=${event.responseId ?? "(none)"} toolCalls=${formatToolCallList(event.toolCalls)}`;
 }
 
 function formatProjectCommandEventLine(
@@ -1220,6 +1253,8 @@ function collectAuditTimelineItems(events: ToolAuditEvent[]): AuditTimelineItem[
         approvalRequired: 0,
         ...(callId ? { callId } : {}),
         depth: event.depth ?? 0,
+        ...(event.spanId ? { spanId: event.spanId } : {}),
+        ...(event.parentCallId ? { parentCallId: event.parentCallId } : {}),
         eventCount: 0,
         kind: "tool_call",
         lastTimestamp: event.timestamp,
@@ -1237,6 +1272,14 @@ function collectAuditTimelineItems(events: ToolAuditEvent[]): AuditTimelineItem[
 
     if (event.depth !== undefined) {
       current.depth = event.depth;
+    }
+
+    if (event.spanId) {
+      current.spanId = event.spanId;
+    }
+
+    if (event.parentCallId) {
+      current.parentCallId = event.parentCallId;
     }
 
     if (event.timestamp >= current.lastTimestamp) {
@@ -1294,6 +1337,14 @@ function formatAuditTimelineItem(item: AuditTimelineItem): string {
 
   if (item.workspaceImpact) {
     parts.push(`impact=${item.workspaceImpact}`);
+  }
+
+  if (item.spanId) {
+    parts.push(`span=${item.spanId}`);
+  }
+
+  if (item.parentCallId) {
+    parts.push(`parent=${item.parentCallId}`);
   }
 
   if (item.inputSummary) {

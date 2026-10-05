@@ -233,6 +233,10 @@ export class Agent {
   private readonly usageTotals: UsageStats = createUsageStats();
   private readonly writtenPaths = new Set<string>();
   private depth = 0;
+  private spanId: string | undefined;
+  private parentCallId: string | undefined;
+  private activeToolCallId: string | undefined;
+  private childSpanCount = 0;
 
   constructor(
     private readonly model: ModelClient = createModelClient(),
@@ -304,8 +308,15 @@ export class Agent {
     return [...this.writtenPaths].sort();
   }
 
-  setTraceDepth(depth: number): void {
+  adoptSubagentContext(depth: number, spanId: string, parentCallId: string | undefined): void {
     this.depth = Math.max(0, Math.floor(depth));
+    this.spanId = spanId;
+    this.parentCallId = parentCallId;
+  }
+
+  private nextChildSpanId(): string {
+    this.childSpanCount += 1;
+    return `subagent-${this.childSpanCount}`;
   }
 
   async handleUserMessage(
@@ -1467,7 +1478,7 @@ export class Agent {
       undefined,
       this.auditLogger,
     );
-    child.setTraceDepth(this.depth + 1);
+    child.adoptSubagentContext(this.depth + 1, this.nextChildSpanId(), this.activeToolCallId);
     const response = await child.handleUserMessage(buildSubagentPrompt(prompt));
     this.adoptSubagentPatch(child);
     this.adoptSubagentUsage(child);
@@ -1492,7 +1503,7 @@ export class Agent {
           undefined,
           this.auditLogger,
         );
-        child.setTraceDepth(this.depth + 1);
+        child.adoptSubagentContext(this.depth + 1, this.nextChildSpanId(), this.activeToolCallId);
         const response = await child.handleUserMessage(buildSubagentPrompt(prompt));
         return { child, content: response.content };
       }),
@@ -1645,6 +1656,7 @@ export class Agent {
       }
     }
 
+    this.activeToolCallId = callId;
     const result = await this.tools.execute(name, input, this.buildToolContext());
     await emitToolFinish(onStreamEvent, name, result, callId);
     await this.recordAudit({
@@ -3461,6 +3473,8 @@ export class Agent {
       await this.auditLogger.record({
         timestamp: new Date().toISOString(),
         ...(this.depth > 0 ? { depth: this.depth } : {}),
+        ...(this.spanId ? { spanId: this.spanId } : {}),
+        ...(this.parentCallId ? { parentCallId: this.parentCallId } : {}),
         ...event,
       });
     } catch (error) {
