@@ -106,6 +106,14 @@ function getBaseToolRisk(
     };
   }
 
+  if (toolName === "run_subagents") {
+    return {
+      risk: "medium",
+      reasons: ["tool delegates work to several parallel nested read-only agents, each consuming additional model calls"],
+      workspaceImpact: "unknown",
+    };
+  }
+
   if (toolName === "build_context_index") {
     return {
       risk: "low",

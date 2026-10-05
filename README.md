@@ -418,6 +418,7 @@ read_file
 search_files
 suggest_context
 run_subagent
+run_subagents
 build_context_index
 context_index_status
 search_context_index

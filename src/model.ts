@@ -219,6 +219,7 @@ const BASE_SYSTEM_PROMPT = [
   "Use workspace_info when you want a quick read-only summary of the workspace root.",
   "Use suggest_context when you need a short list of relevant files before reading them.",
   "Use run_subagent to delegate isolated research or scoped editing across several files without polluting the main conversation.",
+  "Use run_subagents to run several independent read-only research subagents in parallel, then compare or combine their results at once.",
   "Use search_context_index when a persistent local index is available and you need relevant files without scanning the whole workspace.",
   "Use build_context_index when the user asks to build, refresh, or update the local workspace index.",
   "Use search_semantic_index when a semantic vector index is available and the query is conceptual rather than exact text.",

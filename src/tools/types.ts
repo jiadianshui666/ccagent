@@ -6,6 +6,7 @@ export type ToolContext = {
   updatePlan?: (plan: PlanState) => void;
   updateTaskState?: (update: TaskStateUpdate) => TaskState | undefined;
   runSubagent?: (prompt: string) => Promise<string>;
+  runSubagents?: (prompts: string[]) => Promise<string[]>;
 };
 
 export type ToolParameterSchema = {

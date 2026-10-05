@@ -1418,16 +1418,20 @@ export class Agent {
       },
       updateTaskState: (update) => this.applyTaskStateUpdate(update),
       runSubagent: (prompt) => this.runSubagent(prompt),
+      runSubagents: (prompts) => this.runSubagents(prompts),
     };
   }
 
-  private buildSubagentToolRegistry(): ToolRegistry {
+  private buildSubagentToolRegistry(writable = true): ToolRegistry {
     const writableTools = new Set(["edit", "apply_patch", "reverse_patch"]);
     const tools = createDefaultToolRegistry()
       .list()
       .filter((tool) => {
         const preflight = createToolPreflight({ toolName: tool.name, input: {} });
-        return preflight.workspaceImpact === "read-only" || writableTools.has(tool.name);
+        return (
+          preflight.workspaceImpact === "read-only" ||
+          (writable && writableTools.has(tool.name))
+        );
       });
 
     return new ToolRegistry(tools);
@@ -1445,6 +1449,23 @@ export class Agent {
     const response = await child.handleUserMessage(buildSubagentPrompt(prompt));
     this.adoptSubagentPatch(child);
     return response.content;
+  }
+
+  private async runSubagents(prompts: string[]): Promise<string[]> {
+    return Promise.all(
+      prompts.map(async (prompt) => {
+        const childModel = this.model.createChild?.() ?? this.model;
+        const child = new Agent(
+          childModel,
+          this.buildSubagentToolRegistry(false),
+          this.workspaceRoot,
+          this.approveTool,
+          this.debug,
+        );
+        const response = await child.handleUserMessage(buildSubagentPrompt(prompt));
+        return response.content;
+      }),
+    );
   }
 
   private adoptSubagentPatch(child: Agent): void {
