@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "k": 4,
+  "thresholds": {
+    "lexicalRecallAtK": 0.8,
+    "lexicalMrr": 0.6,
+    "automaticRecallAtK": 0.8,
+    "automaticMrr": 0.6
+  },
+  "cases": [
+    {
+      "name": "types-namespace",
+      "query": "Rogier Schouten namespace kleur Color interface",
+      "expected": [
+        "index.d.ts"
+      ]
+    },
+    {
+      "name": "cjs-factory",
+      "query": "module.exports chain colors factory",
+      "expected": [
+        "index.js"
+      ]
+    },
+    {
+      "name": "esm-default",
+      "query": "export default enabled chain run",
+      "expected": [
+        "index.mjs"
+      ]
+    },
+    {
+      "name": "background-colors",
+      "query": "bgBlack bgWhite ANSI background init",
+      "expected": [
+        "colors.js",
+        "colors.mjs"
+      ]
+    },
+    {
+      "name": "color-types",
+      "query": "function print input string boolean colorize",
+      "expected": [
+        "colors.d.ts"
+      ]
+    }
+  ]
+}

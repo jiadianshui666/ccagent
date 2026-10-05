@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "k": 5,
+  "thresholds": {
+    "lexicalRecallAtK": 1,
+    "lexicalMrr": 1,
+    "automaticRecallAtK": 1,
+    "automaticMrr": 1
+  },
+  "cases": [
+    {
+      "name": "context-graph-traversal",
+      "query": "GraphTraversalCandidate",
+      "expected": [
+        "src/contextIndex.ts"
+      ]
+    },
+    {
+      "name": "retrieval-manifest-schema",
+      "query": "RetrievalEvalManifest",
+      "expected": [
+        "src/retrievalEval.ts"
+      ]
+    },
+    {
+      "name": "automatic-task-context",
+      "query": "prepareAutomaticTaskContext",
+      "expected": [
+        "src/taskContext.ts"
+      ]
+    },
+    {
+      "name": "chat-completions-request",
+      "query": "OpenAIChatCompletionsRequest",
+      "expected": [
+        "src/model.ts"
+      ]
+    },
+    {
+      "name": "offline-eval-runner",
+      "query": "runOfflineEvalCase",
+      "expected": [
+        "src/evals.ts"
+      ]
+    }
+  ]
+}

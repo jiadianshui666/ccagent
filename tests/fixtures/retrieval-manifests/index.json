@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "note": "Real-repository retrieval manifests. Reproduce with: node scripts/retrieval-manifests-run.mjs all --fetch",
+  "repositories": [
+    {
+      "id": "debug",
+      "package": "debug",
+      "npmVersion": "4.4.1",
+      "manifest": "debug.json",
+      "notes": "debug-js/debug; 6 cases over src/index.js, src/common.js, src/node.js, src/browser.js"
+    },
+    {
+      "id": "kleur",
+      "package": "kleur",
+      "npmVersion": "4.1.5",
+      "manifest": "kleur.json",
+      "notes": "lukeed/kleur; 5 cases covering CJS/ESM variants and d.ts declarations"
+    },
+    {
+      "id": "picomatch",
+      "package": "picomatch",
+      "npmVersion": "4.0.2",
+      "manifest": "picomatch.json",
+      "notes": "micromatch/picomatch; 6 cases; posix-entry documents the re-export discovery gap"
+    }
+  ]
+}

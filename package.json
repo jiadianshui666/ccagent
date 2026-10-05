@@ -1,0 +1,77 @@
+{
+  "name": "ccagent",
+  "version": "0.3.0",
+  "description": "A terminal coding agent with approvals, policy guards, audit logs, and optional Docker sandboxing for shell commands.",
+  "license": "MIT",
+  "keywords": [
+    "coding-agent",
+    "cli",
+    "terminal",
+    "ai"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "ccagent": "./dist/index.js"
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "node scripts/test.mjs",
+    "prepublishOnly": "npm run release:full",
+    "test:benchmark": "npm run evals:benchmark",
+    "ci": "npm run build && npm test && npm run baseline:gate && npm run release:check && npm run provider:ci",
+    "check": "npm run build && npm run evals:smoke",
+    "check:full": "npm run build && npm test && npm run evals:smoke",
+    "evals": "tsx src/index.ts --no-session /evals",
+    "evals:smoke": "tsx src/index.ts --no-session /evals smoke",
+    "evals:regression": "tsx src/index.ts --no-session /evals regression",
+    "evals:benchmark": "tsx src/index.ts --no-session /evals benchmark",
+    "evals:cases": "tsx src/index.ts --no-session /evals cases",
+    "evals:tags": "tsx src/index.ts --no-session /evals tags",
+    "evals:case": "tsx src/index.ts --no-session /evals case",
+    "evals:report": "tsx src/index.ts --no-session /evals report benchmark",
+    "evals:reports": "tsx src/index.ts --no-session /evals reports",
+    "evals:compare": "tsx src/index.ts --no-session /evals compare",
+    "evals:baseline": "tsx src/index.ts --no-session /evals baseline",
+    "evals:gate": "node scripts/evals-gate.mjs",
+    "evals:gate-ci": "tsx src/index.ts --no-session /evals report smoke && tsx src/index.ts --no-session /evals report smoke && npm run evals:gate -- --strict",
+    "baseline:update": "node scripts/baseline-update.mjs",
+    "baseline:gate": "node scripts/baseline-gate.mjs",
+    "provider:smoke": "tsx src/index.ts --no-session /provider-smoke",
+    "provider:smoke:full": "tsx src/index.ts --no-session /provider-smoke --full",
+    "provider:report": "tsx src/index.ts --no-session /provider-smoke --full --save",
+    "provider:reports": "tsx src/index.ts --no-session /provider-reports",
+    "provider:compare": "tsx src/index.ts --no-session /provider-compare",
+    "provider:gate": "tsx src/index.ts --no-session /provider-gate",
+    "provider:repair": "tsx src/index.ts --no-session /provider-repair",
+    "provider:repair:report": "tsx src/index.ts --no-session /provider-repair --save",
+    "provider:repair:reports": "tsx src/index.ts --no-session /provider-repair-reports",
+    "provider:repair:compare": "tsx src/index.ts --no-session /provider-repair-compare",
+    "provider:repair:gate": "tsx src/index.ts --no-session /provider-repair-gate",
+    "provider:ci": "npm run provider:report && npm run provider:report && npm run provider:gate",
+    "retrieval:manifests": "node scripts/retrieval-manifests-run.mjs",
+    "release:check": "npm run build && node scripts/release-check.mjs",
+    "release:full": "npm run build && npm test && npm run evals:smoke && node scripts/release-check.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "jsonc-parser": "^3.3.1",
+    "minimatch": "^10.2.5",
+    "openai": "^6.45.0",
+    "typescript": "^5.9.3",
+    "yaml": "^2.9.0"
+  }
+}

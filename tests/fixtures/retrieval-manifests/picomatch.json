@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "k": 5,
+  "thresholds": {
+    "lexicalRecallAtK": 0.8,
+    "lexicalMrr": 0.6,
+    "automaticRecallAtK": 0.8,
+    "automaticMrr": 0.6
+  },
+  "cases": [
+    {
+      "name": "glob-parse",
+      "query": "parse glob AST bracket expansion characters",
+      "expected": [
+        "lib/parse.js"
+      ]
+    },
+    {
+      "name": "glob-scan",
+      "query": "scan input tokens star slash depth",
+      "expected": [
+        "lib/scan.js"
+      ]
+    },
+    {
+      "name": "matcher",
+      "query": "picomatch matcher returnState cache options",
+      "expected": [
+        "lib/picomatch.js"
+      ]
+    },
+    {
+      "name": "regex-constants",
+      "query": "WIN_SLASH DOT_LITERAL QMARK_LITERAL",
+      "expected": [
+        "lib/constants.js"
+      ]
+    },
+    {
+      "name": "path-utils",
+      "query": "isWindows removeBackslashes toPosixSlashes",
+      "expected": [
+        "lib/utils.js"
+      ]
+    },
+    {
+      "name": "posix-entry",
+      "query": "posix module entry point picomatch",
+      "expected": [
+        "posix.js"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "k": 4,
+  "thresholds": {
+    "lexicalRecallAtK": 0.8,
+    "lexicalMrr": 0.6,
+    "automaticRecallAtK": 0.8,
+    "automaticMrr": 0.6
+  },
+  "cases": [
+    {
+      "name": "debug-factory",
+      "query": "createDebug factory namespace edit",
+      "expected": [
+        "src/common.js"
+      ]
+    },
+    {
+      "name": "setup-registry",
+      "query": "setup createDebug.enable createDebug.coerce env",
+      "expected": [
+        "src/common.js"
+      ]
+    },
+    {
+      "name": "entry-detection",
+      "query": "electron renderer nwjs detection require",
+      "expected": [
+        "src/index.js"
+      ]
+    },
+    {
+      "name": "node-inspect",
+      "query": "inspectOpts process.env filter colors",
+      "expected": [
+        "src/node.js"
+      ]
+    },
+    {
+      "name": "browser-storage",
+      "query": "localStorage storage save load message",
+      "expected": [
+        "src/browser.js"
+      ]
+    },
+    {
+      "name": "node-date",
+      "query": "getDate millisecond timestamp",
+      "expected": [
+        "src/node.js"
+      ]
+    }
+  ]
+}

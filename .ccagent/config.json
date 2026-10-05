@@ -1,0 +1,10 @@
+{
+  "model": "gpt-5.5",
+  "autoApprove": {
+    "shellCommands": []
+  },
+  "openai": {
+    "apiMode": "chat",
+    "baseURL": "https://api.wcgio.com/v1"
+  }
+}

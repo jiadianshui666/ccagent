@@ -1,0 +1,35 @@
+{
+  "exportedAt": "2026-09-27T16:26:52.444Z",
+  "fileName": "eval-baseline-smoke.json",
+  "jsonFileName": "eval-baseline-smoke.json",
+  "jsonPath": "tests/fixtures/eval-baseline-smoke.json",
+  "path": "tests/fixtures/eval-baseline-smoke.json",
+  "result": {
+    "durationMs": 27,
+    "failed": 0,
+    "passed": 3,
+    "results": [
+      {
+        "durationMs": 10,
+        "name": "list_files",
+        "status": "pass",
+        "summary": "listed README.md through the list_files tool"
+      },
+      {
+        "durationMs": 10,
+        "name": "workspace_info",
+        "status": "pass",
+        "summary": "summarized the workspace root through the workspace_info tool"
+      },
+      {
+        "durationMs": 7,
+        "name": "read_file",
+        "status": "pass",
+        "summary": "read note.txt through the read_file tool"
+      }
+    ],
+    "suite": "smoke",
+    "skipped": 0
+  },
+  "suite": "smoke"
+}

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.ccagent/history
+.ccagent/sessions/
+.ccagent/logs/
+.ccagent/reports/
+.ccagent/exports/
+.ccagent/patch-snapshots/
+.ccagent/index/
