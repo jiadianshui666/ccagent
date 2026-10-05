@@ -8,3 +8,4 @@ dist/
 .ccagent/exports/
 .ccagent/patch-snapshots/
 .ccagent/index/
+.ccagent/provider-profiles.json
