@@ -417,6 +417,7 @@ list_files
 read_file
 search_files
 suggest_context
+run_subagent
 build_context_index
 context_index_status
 search_context_index
@@ -807,7 +808,8 @@ Use `/provider-repair` after a real full provider smoke pass to run a controlled
 repair benchmark through the current model. It builds a temporary broken project
 for each repair task, runs verification, asks the model to repair it through the
 same agent tool loop, and removes the fixtures afterward. By default it runs
-every repair task (`order-service`, `truncate-boundary`, `date-pad`) and reports
+every repair task (`order-service`, `truncate-boundary`, `date-pad`,
+`cross-module-contract`, `rounding-boundary`) and reports
 a per-task summary; pass `--task <name>` to run a single task. Add `--save` to
 write a Markdown and JSON benchmark report under `.ccagent/reports/`. Without
 `OPENAI_API_KEY`, it reports `SKIP` and does not call the model.

@@ -5,6 +5,7 @@ export type ToolContext = {
   workspaceRoot: string;
   updatePlan?: (plan: PlanState) => void;
   updateTaskState?: (update: TaskStateUpdate) => TaskState | undefined;
+  runSubagent?: (prompt: string) => Promise<string>;
 };
 
 export type ToolParameterSchema = {

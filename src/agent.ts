@@ -63,7 +63,7 @@ import {
   setPlanStepStatus,
   type PlanStepStatus,
 } from "./plan.js";
-import { createDefaultToolRegistry, type ToolRegistry } from "./tools/registry.js";
+import { createDefaultToolRegistry, ToolRegistry } from "./tools/registry.js";
 import type { Tool, ToolContext, ToolResult } from "./tools/types.js";
 import {
   createEmptySession,
@@ -1417,7 +1417,46 @@ export class Agent {
         });
       },
       updateTaskState: (update) => this.applyTaskStateUpdate(update),
+      runSubagent: (prompt) => this.runSubagent(prompt),
     };
+  }
+
+  private buildSubagentToolRegistry(): ToolRegistry {
+    const writableTools = new Set(["edit", "apply_patch", "reverse_patch"]);
+    const tools = createDefaultToolRegistry()
+      .list()
+      .filter((tool) => {
+        const preflight = createToolPreflight({ toolName: tool.name, input: {} });
+        return preflight.workspaceImpact === "read-only" || writableTools.has(tool.name);
+      });
+
+    return new ToolRegistry(tools);
+  }
+
+  private async runSubagent(prompt: string): Promise<string> {
+    const childModel = this.model.createChild?.() ?? this.model;
+    const child = new Agent(
+      childModel,
+      this.buildSubagentToolRegistry(),
+      this.workspaceRoot,
+      this.approveTool,
+      this.debug,
+    );
+    const response = await child.handleUserMessage(buildSubagentPrompt(prompt));
+    this.adoptSubagentPatch(child);
+    return response.content;
+  }
+
+  private adoptSubagentPatch(child: Agent): void {
+    const lastPatch = child.snapshotSession().lastPatch;
+
+    if (!lastPatch) {
+      return;
+    }
+
+    this.lastPatch = lastPatch;
+    this.taskState = recordTaskPatch(this.taskState, lastPatch);
+    this.debug("subagent.patch_adopted", { paths: lastPatch.paths });
   }
 
   private async executeTool(
@@ -1543,8 +1582,17 @@ export class Agent {
         : await this.appendSuggestedVerificationAfterPatch(result);
     }
 
-    if (name === "apply_patch" && result.ok && typeof input.patch === "string") {
-      this.rememberPatch(input.patch, result.metadata);
+    if (result.ok) {
+      const patch =
+        name === "apply_patch" && typeof input.patch === "string"
+          ? input.patch
+          : name === "edit" && typeof result.metadata?.patch === "string"
+            ? result.metadata.patch
+            : undefined;
+
+      if (patch) {
+        this.rememberPatch(patch, result.metadata);
+      }
     }
 
     if (name === "reverse_patch" && result.ok) {
@@ -3573,6 +3621,18 @@ function formatPolicyDeniedError(
 
 function isPatchTool(name: string): boolean {
   return name === "apply_patch" || name === "reverse_patch";
+}
+
+function buildSubagentPrompt(prompt: string): string {
+  return [
+    "You are a focused subagent helping a parent coding agent inside this workspace.",
+    "Locate target files directly with read_file or search_files; avoid a full list_files scan.",
+    "You may edit files with edit or apply_patch when the task requires it; keep edits minimal and scoped.",
+    "Stop once done and return a concise factual summary without restating these instructions.",
+    "",
+    "Task:",
+    prompt,
+  ].join("\n");
 }
 
 function isWorkspaceWriteTool(name: string): boolean {

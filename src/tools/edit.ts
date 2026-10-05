@@ -128,6 +128,7 @@ export class EditTool implements Tool {
       metadata: {
         paths: [requestedPath],
         snapshotPath,
+        patch,
       },
     };
   }

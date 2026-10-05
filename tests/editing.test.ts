@@ -685,6 +685,81 @@ test("ApplyPatchTool approvalMessage groups files by patch risk", () => {
   assert.match(message ?? "", /Low risk files:\n- docs\/readme\.md: modify, \+1 -0, hunks=1/);
 });
 
+class DelegatingSubagentModel implements ModelClient {
+  readonly name = "delegating";
+
+  async createTurn(input: ModelTurnInput): Promise<ModelResult> {
+    if (!input.toolOutputs || input.toolOutputs.length === 0) {
+      return {
+        content: "",
+        toolCalls: [
+          {
+            callId: "delegate-1",
+            name: "run_subagent",
+            arguments: { prompt: "edit demo.txt: replace old\n with new\n" },
+            rawArguments: JSON.stringify({ prompt: "edit demo.txt" }),
+          },
+        ],
+      };
+    }
+
+    return { content: "delegated edit done", toolCalls: [] };
+  }
+
+  createChild(): ModelClient {
+    return new EditingSubagentModel();
+  }
+}
+
+class EditingSubagentModel implements ModelClient {
+  readonly name = "editing-subagent";
+
+  async createTurn(input: ModelTurnInput): Promise<ModelResult> {
+    if (!input.toolOutputs || input.toolOutputs.length === 0) {
+      return {
+        content: "",
+        toolCalls: [
+          {
+            callId: "child-edit-1",
+            name: "edit",
+            arguments: { path: "demo.txt", old_string: "old\n", new_string: "new\n" },
+            rawArguments: JSON.stringify({ path: "demo.txt", old_string: "old\n", new_string: "new\n" }),
+          },
+        ],
+      };
+    }
+
+    return { content: "edited", toolCalls: [] };
+  }
+
+  createChild(): ModelClient {
+    return new EditingSubagentModel();
+  }
+}
+
+test("Agent adopts a subagent edit for undo", async (t) => {
+  if (!(await hasGit())) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-subagent-undo-"));
+
+  try {
+    await writeFile(join(workspaceRoot, "demo.txt"), "old\n", "utf8");
+
+    const agent = new Agent(new DelegatingSubagentModel(), undefined, workspaceRoot, async () => true);
+    await agent.handleUserMessage("delegate an edit of demo.txt");
+
+    assert.equal(normalizeLineEndings(await readFile(join(workspaceRoot, "demo.txt"), "utf8")), "new\n");
+
+    await agent.handleUserMessage("/undo");
+    assert.equal(normalizeLineEndings(await readFile(join(workspaceRoot, "demo.txt"), "utf8")), "old\n");
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 class StaleApplyPatchModel implements ModelClient {
   readonly name = "stale-apply-patch";
   receivedToolOutput = "";

@@ -133,6 +133,7 @@ export interface ModelClient {
   createTurnStream?(input: ModelTurnInput, onEvent: ModelStreamHandler): Promise<ModelResult>;
   restoreConversation?(messages: ConversationMessage[]): void;
   reset?(): void;
+  createChild?(): ModelClient;
 }
 
 export type ModelClientOptions = {
@@ -217,6 +218,7 @@ const BASE_SYSTEM_PROMPT = [
   "Use list_files to inspect project structure before deciding what to read or search.",
   "Use workspace_info when you want a quick read-only summary of the workspace root.",
   "Use suggest_context when you need a short list of relevant files before reading them.",
+  "Use run_subagent to delegate isolated research or scoped editing across several files without polluting the main conversation.",
   "Use search_context_index when a persistent local index is available and you need relevant files without scanning the whole workspace.",
   "Use build_context_index when the user asks to build, refresh, or update the local workspace index.",
   "Use search_semantic_index when a semantic vector index is available and the query is conceptual rather than exact text.",
@@ -258,6 +260,10 @@ export class MockModelClient implements ModelClient {
   private readonly userMessages: string[] = [];
   private pendingEdit: PendingEditRequest | null = null;
   private pendingTask: PendingTaskRequest | null = null;
+
+  createChild(): ModelClient {
+    return new MockModelClient();
+  }
 
   async createTurnStream(
     input: ModelTurnInput,
@@ -951,6 +957,8 @@ export function classifyModelProviderError(error: unknown): ModelProviderErrorCl
 export class OpenAIModelClient implements ModelClient {
   readonly name: string;
   private readonly client: OpenAI;
+  private readonly apiKey: string;
+  private readonly baseURL?: string;
 
   constructor(
     apiKey: string,
@@ -959,8 +967,20 @@ export class OpenAIModelClient implements ModelClient {
     private readonly projectInstructions?: string,
     private readonly providerRetry?: ModelProviderRetryConfig,
   ) {
+    this.apiKey = apiKey;
+    this.baseURL = baseURL;
     this.client = new OpenAI(buildOpenAIClientConfig(apiKey, baseURL));
     this.name = baseURL ? `openai:${model}@${baseURL}` : `openai:${model}`;
+  }
+
+  createChild(): ModelClient {
+    return new OpenAIModelClient(
+      this.apiKey,
+      this.model,
+      this.baseURL,
+      this.projectInstructions,
+      this.providerRetry,
+    );
   }
 
   async createTurn(input: ModelTurnInput): Promise<ModelResult> {
@@ -1042,6 +1062,8 @@ export class OpenAIChatCompletionsModelClient implements ModelClient {
   readonly name: string;
   private readonly client: OpenAI;
   private readonly messages: ChatCompletionMessageParam[] = [];
+  private readonly apiKey: string;
+  private readonly baseURL?: string;
 
   constructor(
     apiKey: string,
@@ -1050,9 +1072,21 @@ export class OpenAIChatCompletionsModelClient implements ModelClient {
     private readonly projectInstructions?: string,
     private readonly providerRetry?: ModelProviderRetryConfig,
   ) {
+    this.apiKey = apiKey;
+    this.baseURL = baseURL;
     this.client = new OpenAI(buildOpenAIClientConfig(apiKey, baseURL));
     this.name = baseURL ? `openai-chat:${model}@${baseURL}` : `openai-chat:${model}`;
     this.reset();
+  }
+
+  createChild(): ModelClient {
+    return new OpenAIChatCompletionsModelClient(
+      this.apiKey,
+      this.model,
+      this.baseURL,
+      this.projectInstructions,
+      this.providerRetry,
+    );
   }
 
   async createTurn(input: ModelTurnInput): Promise<ModelResult> {

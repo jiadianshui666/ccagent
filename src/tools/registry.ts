@@ -5,6 +5,7 @@ import {
   SearchContextIndexTool,
 } from "./contextIndex.js";
 import { EditTool } from "./edit.js";
+import { RunSubagentTool } from "./runSubagent.js";
 import { GitDiffTool } from "./gitDiff.js";
 import { GitStatusTool } from "./gitStatus.js";
 import { ListFilesTool } from "./listFiles.js";
@@ -121,6 +122,7 @@ export function createDefaultToolRegistry(
     new ApplyPatchTool(),
     new ReversePatchTool(),
     new EditTool(),
+    new RunSubagentTool(),
     new RestorePatchSnapshotTool(),
     new GitStatusTool(),
     new GitDiffTool(),
