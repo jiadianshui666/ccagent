@@ -1,15 +1,26 @@
+import { lookup } from "node:dns/promises";
+
+export type ResolveHost = (hostname: string) => Promise<Array<{ address: string; family: number }>>;
+
 export type Fetcher = (
   url: string,
-  init?: { signal?: AbortSignal; headers?: Record<string, string> },
+  init?: {
+    signal?: AbortSignal;
+    headers?: Record<string, string>;
+    redirect?: "follow" | "manual";
+  },
 ) => Promise<{
   ok: boolean;
   status: number;
+  headers: { get(name: string): string | null };
   text(): Promise<string>;
 }>;
 
 export type WebFetchOptions = {
+  allowPrivateNetwork?: boolean;
   fetcher?: Fetcher;
   maxChars?: number;
+  resolveHost?: ResolveHost;
   timeoutMs?: number;
 };
 
@@ -37,6 +48,7 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_CHARS = 20_000;
 const DEFAULT_SEARCH_BASE_URL = "https://html.duckduckgo.com/html/";
 const DEFAULT_SEARCH_RESULTS = 5;
+const MAX_WEB_REDIRECTS = 5;
 const DEFAULT_USER_AGENT = "CCAgent/0.3 (+terminal coding agent; https://github.com/ccagent)";
 
 function defaultFetcher(timeoutMs: number): Fetcher {
@@ -47,7 +59,7 @@ function defaultFetcher(timeoutMs: number): Fetcher {
     try {
       const response = await fetch(url, {
         method: "GET",
-        redirect: "follow",
+        redirect: init?.redirect ?? "follow",
         signal: init?.signal ?? controller.signal,
         headers: init?.headers,
       });
@@ -55,6 +67,7 @@ function defaultFetcher(timeoutMs: number): Fetcher {
       return {
         ok: response.ok,
         status: response.status,
+        headers: response.headers,
         text: () => response.text(),
       };
     } finally {
@@ -64,11 +77,15 @@ function defaultFetcher(timeoutMs: number): Fetcher {
 }
 
 export async function fetchWebPage(url: string, options: WebFetchOptions = {}): Promise<WebFetchResult> {
-  assertHttpUrl(url);
   const fetcher = options.fetcher ?? defaultFetcher(options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const maxChars = options.maxChars ?? DEFAULT_MAX_CHARS;
 
-  const response = await fetcher(url, { headers: { "user-agent": DEFAULT_USER_AGENT } });
+  const response = await fetchPageWithRedirects(
+    fetcher,
+    url,
+    options.allowPrivateNetwork === true,
+    options.resolveHost ?? defaultResolveHost,
+  );
 
   if (!response.ok) {
     throw new Error(`Request failed with status ${response.status}.`);
@@ -88,6 +105,45 @@ export async function fetchWebPage(url: string, options: WebFetchOptions = {}): 
     text,
     truncated,
   };
+}
+
+async function fetchPageWithRedirects(
+  fetcher: Fetcher,
+  url: string,
+  allowPrivateNetwork: boolean,
+  resolveHost: ResolveHost,
+): Promise<Awaited<ReturnType<Fetcher>>> {
+  let current = url;
+
+  for (let hop = 0; hop <= MAX_WEB_REDIRECTS; hop += 1) {
+    const parsed = parseHttpUrl(current);
+
+    await assertSafeHost(parsed.hostname, allowPrivateNetwork, resolveHost);
+
+    const response = await fetcher(current, {
+      headers: { "user-agent": DEFAULT_USER_AGENT },
+      redirect: "manual",
+    });
+
+    if (isRedirectStatus(response.status)) {
+      const location = response.headers.get("location");
+
+      if (!location) {
+        return response;
+      }
+
+      current = new URL(location, current).toString();
+      continue;
+    }
+
+    return response;
+  }
+
+  throw new Error(`Redirected more than ${MAX_WEB_REDIRECTS} times.`);
+}
+
+function isRedirectStatus(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
 
 export async function searchWeb(query: string, options: WebSearchOptions = {}): Promise<WebSearchResult[]> {
@@ -221,7 +277,7 @@ function normalizeResultUrl(rawUrl: string): string {
   return /^https?:\/\//i.test(rawUrl) ? rawUrl : "";
 }
 
-function assertHttpUrl(url: string): void {
+function parseHttpUrl(url: string): URL {
   let parsed: URL;
 
   try {
@@ -233,6 +289,119 @@ function assertHttpUrl(url: string): void {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("Only http and https URLs are supported.");
   }
+
+  return parsed;
+}
+
+const defaultResolveHost: ResolveHost = (hostname) => lookup(hostname, { all: true, verbatim: true });
+
+async function assertSafeHost(
+  hostname: string,
+  allowPrivateNetwork: boolean,
+  resolveHost: ResolveHost,
+): Promise<void> {
+  if (allowPrivateNetwork) {
+    return;
+  }
+
+  if (isUnsafeWebHost(hostname)) {
+    throw new Error("Refusing to fetch a private or local network address.");
+  }
+
+  if (isIpLiteral(hostname)) {
+    return;
+  }
+
+  const records = await resolveHost(hostname);
+
+  for (const record of records) {
+    const unsafe =
+      record.family === 4
+        ? isPrivateIPv4(record.address)
+        : isUnsafeIPv6(record.address.toLowerCase());
+
+    if (unsafe) {
+      throw new Error("Refusing to fetch a private or local network address.");
+    }
+  }
+}
+
+function isIpLiteral(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, "");
+
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":");
+}
+
+export function isUnsafeWebHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+
+  if (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal")
+  ) {
+    return true;
+  }
+
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+    return isPrivateIPv4(host);
+  }
+
+  if (host.includes(":")) {
+    return isUnsafeIPv6(host);
+  }
+
+  return false;
+}
+
+function isPrivateIPv4(ip: string): boolean {
+  const parts = ip.split(".").map(Number);
+
+  if (parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return true;
+  }
+
+  const [a, b] = parts as [number, number, number, number];
+
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    a >= 224
+  );
+}
+
+function isUnsafeIPv6(ip: string): boolean {
+  const normalized = ip.toLowerCase();
+
+  if (normalized === "::" || normalized === "::1") {
+    return true;
+  }
+
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) {
+    return true;
+  }
+
+  if (
+    normalized.startsWith("fe8") ||
+    normalized.startsWith("fe9") ||
+    normalized.startsWith("fea") ||
+    normalized.startsWith("feb")
+  ) {
+    return true;
+  }
+
+  if (normalized.startsWith("::ffff:")) {
+    return isPrivateIPv4(normalized.slice("::ffff:".length));
+  }
+
+  return false;
 }
 
 function stripTags(value: string): string {

@@ -4,7 +4,7 @@ import type { Tool, ToolContext, ToolResult } from "./types.js";
 export class WebFetchTool implements Tool {
   readonly name = "web_fetch";
   readonly description =
-    "Fetch a web page over HTTP(S) and return its readable plain text. Use this to retrieve the contents of a specific URL. HTML is stripped and content is size-capped.";
+    "Fetch a web page over HTTP(S) and return its readable plain text. Use this to retrieve the contents of a specific URL. HTML is stripped, content is size-capped, and private or local network addresses are refused.";
   readonly parameters = {
     type: "object",
     properties: {

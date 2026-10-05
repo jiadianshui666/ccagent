@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { extractPageTitle, fetchWebPage, htmlToPlainText, searchWeb } from "../src/web.js";
+import { extractPageTitle, fetchWebPage, htmlToPlainText, isUnsafeWebHost, searchWeb, type Fetcher } from "../src/web.js";
 import { WebFetchTool } from "../src/tools/webFetch.js";
 import { WebSearchTool } from "../src/tools/webSearch.js";
 
@@ -56,7 +56,7 @@ test("fetchWebPage retrieves title and plain text over HTTP", async () => {
       sendHtml(res, "<html><head><title>Example</title></head><body><h1>Heading</h1><p>Some body text.</p></body></html>");
     },
     async (baseUrl) => {
-      const page = await fetchWebPage(`${baseUrl}/page`);
+      const page = await fetchWebPage(`${baseUrl}/page`, { allowPrivateNetwork: true });
 
       assert.equal(page.title, "Example");
       assert.match(page.text, /Heading/);
@@ -72,7 +72,7 @@ test("fetchWebPage fails on non-2xx responses", async () => {
       sendHtml(res, "<html><body>gone</body></html>", 404);
     },
     async (baseUrl) => {
-      await assert.rejects(fetchWebPage(`${baseUrl}/missing`), /status 404/);
+      await assert.rejects(fetchWebPage(`${baseUrl}/missing`, { allowPrivateNetwork: true }), /status 404/);
     },
   );
 });
@@ -80,6 +80,107 @@ test("fetchWebPage fails on non-2xx responses", async () => {
 test("fetchWebPage rejects non-http schemes", async () => {
   await assert.rejects(fetchWebPage("file:///etc/passwd"), /Only http and https/);
   await assert.rejects(fetchWebPage("not a url"), /Invalid URL/);
+});
+
+test("isUnsafeWebHost flags private, loopback, and local addresses", () => {
+  assert.equal(isUnsafeWebHost("127.0.0.1"), true);
+  assert.equal(isUnsafeWebHost("10.0.0.5"), true);
+  assert.equal(isUnsafeWebHost("172.16.0.1"), true);
+  assert.equal(isUnsafeWebHost("192.168.1.1"), true);
+  assert.equal(isUnsafeWebHost("169.254.169.254"), true);
+  assert.equal(isUnsafeWebHost("localhost"), true);
+  assert.equal(isUnsafeWebHost("service.internal"), true);
+  assert.equal(isUnsafeWebHost("::1"), true);
+  assert.equal(isUnsafeWebHost("example.com"), false);
+  assert.equal(isUnsafeWebHost("8.8.8.8"), false);
+});
+
+test("fetchWebPage blocks private hosts unless allowPrivateNetwork is set", async () => {
+  await assert.rejects(fetchWebPage("http://169.254.169.254/"), /private or local network/);
+  await assert.rejects(fetchWebPage("http://127.0.0.1:8080/"), /private or local network/);
+});
+
+test("fetchWebPage follows a local redirect when allowed", async () => {
+  await withServer(
+    (req, res) => {
+      if (req.url === "/redirect") {
+        res.writeHead(302, { location: "/target" });
+        res.end();
+        return;
+      }
+
+      sendHtml(res, "<html><head><title>Redirected</title></head><body>final</body></html>");
+    },
+    async (baseUrl) => {
+      const page = await fetchWebPage(`${baseUrl}/redirect`, { allowPrivateNetwork: true });
+
+      assert.equal(page.title, "Redirected");
+      assert.match(page.text, /final/);
+    },
+  );
+});
+
+test("fetchWebPage blocks redirects to private hosts", async () => {
+  const calls: string[] = [];
+  const fetcher: Fetcher = async (url) => {
+    calls.push(url);
+
+    return {
+      ok: true,
+      status: 302,
+      headers: { get: (name) => (name === "location" ? "http://169.254.169.254/" : null) },
+      text: async () => "",
+    };
+  };
+
+  await assert.rejects(
+    fetchWebPage("https://public.example/page", {
+      fetcher,
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+    }),
+    /private or local network/,
+  );
+  assert.deepEqual(calls, ["https://public.example/page"]);
+});
+
+test("fetchWebPage caps redirect hops", async () => {
+  const fetcher: Fetcher = async (url) => ({
+    ok: true,
+    status: 302,
+    headers: { get: (name) => (name === "location" ? "https://public.example/loop" : null) },
+    text: async () => "",
+  });
+
+  await assert.rejects(
+    fetchWebPage("https://public.example/loop", {
+      fetcher,
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+    }),
+    /Redirected more than/,
+  );
+});
+
+test("fetchWebPage blocks a hostname resolving to a private address", async () => {
+  const resolveHost = async () => [{ address: "10.0.0.5", family: 4 }];
+
+  await assert.rejects(
+    fetchWebPage("https://rebind.example/page", { resolveHost }),
+    /private or local network/,
+  );
+});
+
+test("fetchWebPage allows a hostname resolving to a public address", async () => {
+  const resolveHost = async () => [{ address: "93.184.216.34", family: 4 }];
+  const fetcher: Fetcher = async () => ({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    text: async () => "<html><body>public ok</body></html>",
+  });
+
+  const page = await fetchWebPage("https://rebind.example/page", { fetcher, resolveHost });
+
+  assert.match(page.text, /public ok/);
 });
 
 test("searchWeb parses DuckDuckGo results and decodes redirect URLs", async () => {

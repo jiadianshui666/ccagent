@@ -1561,7 +1561,7 @@ async function evalWebFetch(): Promise<string> {
       res.end("<html><head><title>Eval page</title></head><body><h1>Heading</h1><p>Body text.</p></body></html>");
     },
     async (baseUrl) => {
-      const page = await fetchWebPage(`${baseUrl}/page`);
+      const page = await fetchWebPage(`${baseUrl}/page`, { allowPrivateNetwork: true });
 
       expect(page.title === "Eval page", "expected the page title to be extracted");
       expect(page.text.includes("Heading"), "expected the body text to include Heading");
