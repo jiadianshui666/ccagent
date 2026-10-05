@@ -13,6 +13,7 @@ import {
   formatAuditReplay,
   formatAuditSummary,
   formatAuditTimeline,
+  formatAuditSpanTree,
   formatModelTrace,
   formatProjectCommandHistory,
   formatProjectCommandStats,
@@ -2133,6 +2134,111 @@ test("audit timeline distinguishes sibling spans", async () => {
 
     assert.match(timeline, /tool list_files.*span=subagent-1.*parent=parent/);
     assert.match(timeline, /tool list_files.*span=subagent-2.*parent=parent/);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test("formatAuditSpanTree renders a nested agent/tool/model tree", async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-audit-span-tree-"));
+
+  try {
+    const logger = new FileAuditLogger(workspaceRoot);
+    await logger.record({
+      type: "tool_start",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      callId: "parent",
+      toolName: "run_subagents",
+      inputSummary: "delegate",
+    });
+    await logger.record({
+      type: "model_turn",
+      timestamp: "2026-01-01T00:00:01.000Z",
+      contentLength: 5,
+      durationMs: 100,
+      kind: "user",
+      modelName: "child",
+      round: 0,
+      streamedText: false,
+      toolCalls: ["list_files"],
+      depth: 1,
+      spanId: "subagent-1",
+      parentCallId: "parent",
+      totalTokens: 150,
+    });
+    await logger.record({
+      type: "tool_start",
+      timestamp: "2026-01-01T00:00:02.000Z",
+      callId: "child-a",
+      depth: 1,
+      spanId: "subagent-1",
+      parentCallId: "parent",
+      toolName: "list_files",
+      inputSummary: "list a",
+    });
+    await logger.record({
+      type: "tool_finish",
+      timestamp: "2026-01-01T00:00:03.000Z",
+      callId: "child-a",
+      depth: 1,
+      spanId: "subagent-1",
+      parentCallId: "parent",
+      toolName: "list_files",
+      ok: true,
+      summary: "ok",
+    });
+    await logger.record({
+      type: "tool_start",
+      timestamp: "2026-01-01T00:00:04.000Z",
+      callId: "child-b",
+      depth: 1,
+      spanId: "subagent-2",
+      parentCallId: "parent",
+      toolName: "list_files",
+      inputSummary: "list b",
+    });
+    await logger.record({
+      type: "tool_finish",
+      timestamp: "2026-01-01T00:00:05.000Z",
+      callId: "child-b",
+      depth: 1,
+      spanId: "subagent-2",
+      parentCallId: "parent",
+      toolName: "list_files",
+      ok: true,
+      summary: "ok",
+    });
+    await logger.record({
+      type: "tool_finish",
+      timestamp: "2026-01-01T00:00:06.000Z",
+      callId: "parent",
+      toolName: "run_subagents",
+      ok: true,
+      summary: "ok",
+    });
+
+    const text = await formatAuditSpanTree(workspaceRoot);
+
+    assert.match(text, /\[agent\] main agent/);
+    assert.match(text, /^  \[tool\] run_subagents/m);
+    assert.match(text, /^    \[agent\] subagent-1/m);
+    assert.match(text, /^    \[agent\] subagent-2/m);
+    assert.match(text, /\[tool\] list_files span=subagent-1/);
+    assert.match(text, /\[model\] model span=subagent-1 round=0/);
+
+    const json = JSON.parse(await formatAuditSpanTree(workspaceRoot, { json: true })) as {
+      kind: string;
+      children: Array<{ kind: string; label: string; spanId?: string; children: unknown[] }>;
+    };
+
+    assert.equal(json.kind, "agent");
+    assert.equal(json.children[0]?.kind, "tool");
+    assert.equal(json.children[0]?.label, "run_subagents");
+    assert.ok(
+      (json.children[0]?.children ?? []).some(
+        (child) => child.kind === "agent" && child.spanId === "subagent-1",
+      ),
+    );
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }

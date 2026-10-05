@@ -38,6 +38,7 @@ import {
   formatAuditReplay,
   formatAuditSummary,
   formatAuditTimeline,
+  formatAuditSpanTree,
   formatModelTrace,
   formatProjectCommandHistory,
   formatProjectCommandStats,
@@ -1748,6 +1749,32 @@ async function handleInput(
       content: await formatModelTrace(process.cwd(), {
         all: parsed.all,
         limit: parsed.limit,
+      }),
+    });
+    return {
+      shouldExit: false,
+      shouldResetSessionCreatedAt: false,
+    };
+  }
+
+  if (trimmed === "/audit-span-tree" || trimmed.startsWith("/audit-span-tree ")) {
+    const request = trimmed.slice("/audit-span-tree".length).trim();
+    const parsed = parseAuditSpanTreeRequest(request);
+
+    if (!parsed.ok) {
+      await runtime.renderer.writeFinalResponse({
+        content: parsed.error,
+      });
+      return {
+        shouldExit: false,
+        shouldResetSessionCreatedAt: false,
+      };
+    }
+
+    await runtime.renderer.writeFinalResponse({
+      content: await formatAuditSpanTree(process.cwd(), {
+        all: parsed.all,
+        json: parsed.json,
       }),
     });
     return {
@@ -3927,6 +3954,45 @@ function parseAuditTimelineRequest(request: string): AuditTimelineRequest {
     ok: true,
     all,
     limit: Number(countText),
+  };
+}
+
+type AuditSpanTreeRequest =
+  | {
+      ok: true;
+      all?: boolean;
+      json?: boolean;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
+function parseAuditSpanTreeRequest(request: string): AuditSpanTreeRequest {
+  const parts = request.split(/\s+/).filter(Boolean);
+  const all = parts.includes("--all");
+  const json = parts.includes("--json");
+  const hasUnsupportedOption = parts.some(
+    (part) => part.startsWith("--") && part !== "--all" && part !== "--json",
+  );
+  const positionalParts = parts.filter((part) => !part.startsWith("--"));
+
+  if (
+    parts.filter((part) => part === "--all").length > 1 ||
+    parts.filter((part) => part === "--json").length > 1 ||
+    hasUnsupportedOption ||
+    positionalParts.length > 0
+  ) {
+    return {
+      ok: false,
+      error: "Usage: /audit-span-tree [--all] [--json]",
+    };
+  }
+
+  return {
+    ok: true,
+    all,
+    json,
   };
 }
 

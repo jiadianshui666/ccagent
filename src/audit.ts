@@ -449,6 +449,233 @@ export async function formatUsageModels(
   return lines.join("\n");
 }
 
+export type AuditSpanNode = {
+  id: string;
+  kind: "agent" | "tool" | "model";
+  label: string;
+  depth: number;
+  spanId?: string;
+  parentCallId?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  durationMs?: number;
+  status?: string;
+  round?: number;
+  usage?: UsageRecord;
+  children: AuditSpanNode[];
+};
+
+export type FormatAuditSpanTreeOptions = {
+  all?: boolean;
+  json?: boolean;
+};
+
+export async function formatAuditSpanTree(
+  workspaceRoot: string,
+  options: FormatAuditSpanTreeOptions = {},
+): Promise<string> {
+  const logsDir = join(workspaceRoot, ".ccagent", "logs");
+  const logFiles = options.all ? await findAuditLogs(logsDir) : await findLatestAuditLogAsList(logsDir);
+
+  if (logFiles.length === 0) {
+    return "No audit logs found in .ccagent/logs/.";
+  }
+
+  const parsed = await readAuditLogs(logsDir, logFiles);
+  const root = buildAuditSpanTree(parsed.events);
+
+  return options.json ? JSON.stringify(root, null, 2) : formatAuditSpanTreeText(root);
+}
+
+function buildAuditSpanTree(events: ToolAuditEvent[]): AuditSpanNode {
+  const agents = new Map<string, AuditSpanNode>();
+  const toolNodes = new Map<string, AuditSpanNode>();
+  const agentParentCallId = new Map<string, string>();
+
+  for (const event of events) {
+    if ("spanId" in event && event.spanId && event.parentCallId) {
+      agentParentCallId.set(event.spanId, event.parentCallId);
+    }
+  }
+
+  const getAgent = (spanId: string | undefined): AuditSpanNode => {
+    const key = spanId ?? "";
+    let node = agents.get(key);
+
+    if (!node) {
+      const parentCallId = spanId ? agentParentCallId.get(spanId) : undefined;
+
+      node = {
+        id: spanId ?? "main",
+        kind: "agent",
+        label: spanId ?? "main agent",
+        depth: spanId === undefined ? 0 : 1,
+        ...(spanId ? { spanId } : {}),
+        ...(parentCallId ? { parentCallId } : {}),
+        children: [],
+      };
+      agents.set(key, node);
+    }
+
+    return node;
+  };
+
+  for (const event of events) {
+    if (event.type !== "model_turn") {
+      continue;
+    }
+
+    getAgent(event.spanId).children.push({
+      id: `turn-${event.round}`,
+      kind: "model",
+      label: "model",
+      depth: (event.depth ?? 0) + 1,
+      round: event.round,
+      ...(event.spanId ? { spanId: event.spanId } : {}),
+      startedAt: offsetIso(event.timestamp, -event.durationMs),
+      finishedAt: event.timestamp,
+      durationMs: event.durationMs,
+      ...(event.inputTokens !== undefined || event.outputTokens !== undefined || event.totalTokens !== undefined
+        ? {
+            usage: {
+              ...(event.inputTokens !== undefined ? { inputTokens: event.inputTokens } : {}),
+              ...(event.outputTokens !== undefined ? { outputTokens: event.outputTokens } : {}),
+              ...(event.totalTokens !== undefined ? { totalTokens: event.totalTokens } : {}),
+            },
+          }
+        : {}),
+      children: [],
+    });
+  }
+
+  for (const event of events) {
+    if (!isToolExecutionAuditEvent(event)) {
+      continue;
+    }
+
+    const callId = event.callId ?? "";
+    let node = toolNodes.get(callId);
+
+    if (!node) {
+      node = {
+        id: callId || "legacy",
+        kind: "tool",
+        label: event.toolName,
+        depth: (event.depth ?? 0) + 1,
+        ...(event.spanId ? { spanId: event.spanId } : {}),
+        ...(event.parentCallId ? { parentCallId: event.parentCallId } : {}),
+        children: [],
+      };
+      toolNodes.set(callId, node);
+    }
+
+    node.label = event.toolName;
+
+    if (event.type === "tool_start") {
+      node.startedAt = event.timestamp;
+    } else if (event.type === "tool_finish") {
+      node.finishedAt = event.timestamp;
+      node.status = event.ok ? "ok" : "failed";
+    }
+  }
+
+  for (const node of toolNodes.values()) {
+    finalizeSpanDuration(node);
+    getAgent(node.spanId).children.push(node);
+  }
+
+  for (const agent of agents.values()) {
+    if (agent.parentCallId) {
+      const parentTool = toolNodes.get(agent.parentCallId);
+
+      if (parentTool) {
+        parentTool.children.push(agent);
+      }
+    }
+  }
+
+  const root =
+    agents.get("") ??
+    ({
+      id: "main",
+      kind: "agent",
+      label: "main agent",
+      depth: 0,
+      children: [],
+    } satisfies AuditSpanNode);
+
+  sortSpanNodes(root);
+  return root;
+}
+
+function finalizeSpanDuration(node: AuditSpanNode): void {
+  if (node.startedAt && node.finishedAt) {
+    const start = Date.parse(node.startedAt);
+    const end = Date.parse(node.finishedAt);
+
+    if (Number.isFinite(start) && Number.isFinite(end)) {
+      node.durationMs = end - start;
+    }
+  }
+}
+
+function sortSpanNodes(node: AuditSpanNode): void {
+  node.children.sort((left, right) =>
+    (left.startedAt ?? left.finishedAt ?? "").localeCompare(right.startedAt ?? right.finishedAt ?? ""),
+  );
+
+  for (const child of node.children) {
+    sortSpanNodes(child);
+  }
+}
+
+function offsetIso(timestamp: string, offsetMs: number): string | undefined {
+  const ms = Date.parse(timestamp);
+
+  return Number.isFinite(ms) ? new Date(ms + offsetMs).toISOString() : undefined;
+}
+
+function formatAuditSpanTreeText(root: AuditSpanNode): string {
+  const lines: string[] = [];
+
+  const walk = (node: AuditSpanNode, level: number): void => {
+    lines.push(`${"  ".repeat(level)}${formatSpanNode(node)}`);
+
+    for (const child of node.children) {
+      walk(child, level + 1);
+    }
+  };
+
+  walk(root, 0);
+  return lines.join("\n");
+}
+
+function formatSpanNode(node: AuditSpanNode): string {
+  const parts = [`[${node.kind}] ${node.label}`];
+
+  if (node.spanId) {
+    parts.push(`span=${node.spanId}`);
+  }
+
+  if (node.round !== undefined) {
+    parts.push(`round=${node.round}`);
+  }
+
+  if (node.durationMs !== undefined) {
+    parts.push(`${node.durationMs}ms`);
+  }
+
+  if (node.status) {
+    parts.push(node.status);
+  }
+
+  if (node.usage?.totalTokens !== undefined) {
+    parts.push(`totalTokens=${node.usage.totalTokens}`);
+  }
+
+  return parts.join(" ");
+}
+
 export type FormatAuditCallOptions = {
   all?: boolean;
   callId?: string;

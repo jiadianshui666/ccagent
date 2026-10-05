@@ -136,6 +136,8 @@ const SLASH_COMMAND_CANDIDATES: CompletionCandidate[] = [
   { text: "/audit --jsonl", appendSpace: true },
   { text: "/audit-replay", appendSpace: true },
   { text: "/audit-timeline", appendSpace: true },
+  { text: "/audit-span-tree", appendSpace: true },
+  { text: "/audit-span-tree --json", appendSpace: true },
   { text: "/model" },
   { text: "/model-smoke", appendSpace: true },
   { text: "/model-smoke --stream", appendSpace: true },

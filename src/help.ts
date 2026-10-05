@@ -309,6 +309,8 @@ const HELP_TOPICS: HelpTopic[] = [
       "                              Group events into tool-call steps.",
       "  /model-trace [--all] [count]",
       "                              Show model turn metadata and tokens.",
+      "  /audit-span-tree [--all] [--json]",
+      "                              Show a nested agent/tool/model span tree.",
       "  /usage-summary [--all]      Summarize token usage and cost.",
       "  /usage-models [--all]       Compare token usage by model.",
       "  /audit-call [--all] <callId>",
