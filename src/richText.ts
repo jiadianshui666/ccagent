@@ -62,6 +62,11 @@ type TextStyle =
 
 export type StreamingTextPainter = {
   consume(delta: string): void;
+  /** Append-only streaming: characters are written once and never repainted in place,
+   *  so output stays on a single line even on terminals that do not collapse ANSI
+   *  erase-and-redraw sequences. Completed lines (ending in "\n") are still painted
+   *  with syntax colors. */
+  consumeAppend(delta: string): void;
   finish(): void;
   reset(): void;
   startMarker(prefix: string): void;
@@ -274,6 +279,33 @@ export function createStreamingTextPainter(options: {
 
       if (changed && ink.length > 0) {
         repaintLine();
+      }
+    },
+
+    consumeAppend(delta: string): void {
+      const clean = delta
+        .replace(/\r\n/g, "\n")
+        .replace(/\r/g, "\n")
+        .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+
+      for (const char of clean) {
+        if (char === "\n") {
+          finishLine();
+          continue;
+        }
+
+        ink += char;
+        lineHasInk = true;
+        // Append the character once. Do NOT repaint the current line in place —
+        // re-emitting the whole line per chunk is what floods terminals that do
+        // not collapse erase-and-redraw sequences. Completed lines are recolored
+        // once by finishLine().
+        write(char);
+
+        if (!styleDecided && (ink.includes(" ") || ink.length >= STYLE_DECIDE_AT)) {
+          style = decideStyle(ink);
+          styleDecided = true;
+        }
       }
     },
 

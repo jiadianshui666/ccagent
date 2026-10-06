@@ -430,7 +430,10 @@ export function createRichRenderer(output: Writable, options: RichRendererOption
       openTextBlock();
     }
 
-    painter.consume(cleaned);
+    // Append-only streaming: characters are written once and never repainted in
+    // place. This keeps streamed text on a single line even on terminals that do
+    // not collapse ANSI erase-and-redraw (\r\x1b[2K) sequences.
+    painter.consumeAppend(cleaned);
   };
 
   const writeToolStart = (event: Extract<AgentStreamEvent, { type: "tool_start" }>): void => {
