@@ -3110,7 +3110,11 @@ async function evalRepairLoopProcessCleanup(): Promise<string> {
     const model = new ProcessCleanupRepairEvalModel();
     const agent = new Agent(
       model,
-      createDefaultToolRegistry({ shellCommandTimeoutMs: 1_200 }),
+      // Windows shells (powershell -Command) plus npm cold-start take ~2.2s before
+      // the test script even runs; a 1200ms cap would fire before the leaked
+      // process logs its "all tests passed" signal. Allow enough room to run the
+      // script and still time out on the leaked server.
+      createDefaultToolRegistry({ shellCommandTimeoutMs: 5_000 }),
       workspaceRoot,
       async () => true,
     );
@@ -3124,7 +3128,7 @@ async function evalRepairLoopProcessCleanup(): Promise<string> {
       failed.content.includes("likely: process cleanup/lifecycle failure"),
       `expected process cleanup diagnosis; response was:\n${failed.content}`,
     );
-    expect(failed.content.includes("command timed out after 1200ms"), "expected timeout evidence to be preserved");
+    expect(failed.content.includes("command timed out after 5000ms"), "expected timeout evidence to be preserved");
     expect(failed.content.includes("process tree was terminated"), "expected timed-out process tree cleanup");
     expect(preview.content.includes("process lifecycle defect"), "expected lifecycle-specific repair strategy");
     expect(preview.content.includes("Do not force process.exit(0)"), "expected unsafe workaround guard");
