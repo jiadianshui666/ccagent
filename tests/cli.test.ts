@@ -17,6 +17,29 @@ const projectRoot = process.cwd();
 const tsxCliPath = join(projectRoot, "node_modules", "tsx", "dist", "cli.mjs");
 const sourceCliPath = join(projectRoot, "src", "index.ts");
 
+// Windows releases directory handles for spawned child processes (such as MCP
+// stdio servers) asynchronously after the parent exits, so an immediate rm can
+// fail with EBUSY. Retry briefly for the handle release to complete.
+async function removeWorkspace(workspaceRoot: string): Promise<void> {
+  const delaysMs = [50, 100, 200, 400];
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rm(workspaceRoot, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      const retryable = code === "EBUSY" || code === "EPERM" || code === "ENOTEMPTY";
+
+      if (!retryable || attempt >= delaysMs.length) {
+        throw error;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, delaysMs[attempt]));
+    }
+  }
+}
+
 test("CLI initializes project skills without overwriting existing content", async () => {
   const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-cli-init-skill-"));
   const path = join(workspaceRoot, ".ccagent", "skills", "code-review", "SKILL.md");
@@ -490,7 +513,7 @@ test("CLI shows MCP status and discovered tool catalog without calling the model
       "/mcp read fixture fixture://docs/agent",
       "/tool mcp_fixture_echo_text",
       "exit",
-    ]);
+    ], 15000);
 
     assert.equal(status.exitCode, 0);
     assert.match(status.stdout, /MCP status/);
@@ -535,7 +558,7 @@ test("CLI shows MCP status and discovered tool catalog without calling the model
       warnings: [],
     });
   } finally {
-    await rm(workspaceRoot, { recursive: true, force: true });
+    await removeWorkspace(workspaceRoot);
   }
 });
 
@@ -1728,6 +1751,7 @@ async function runCli(workspaceRoot: string, args: string[]): Promise<CliRunResu
 async function runInteractiveCli(
   workspaceRoot: string,
   lines: string[],
+  timeoutMs = 5000,
 ): Promise<CliRunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [tsxCliPath, sourceCliPath], {
@@ -1747,7 +1771,7 @@ async function runInteractiveCli(
     const timeout = setTimeout(() => {
       child.kill();
       reject(new Error("interactive CLI timed out"));
-    }, 5000);
+    }, timeoutMs);
 
     child.stdout.on("data", (chunk: Buffer) => {
       stdout.push(chunk);
