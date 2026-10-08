@@ -112,3 +112,32 @@ test("retrieval eval measures lexical and automatic repository queries", async (
     await rm(workspaceRoot, { recursive: true, force: true });
   }
 });
+
+test("buildContextIndex surfaces thin re-export entries via inherited target symbols", async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-reexport-entry-"));
+
+  try {
+    await mkdir(join(workspaceRoot, "lib"), { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "posix.js"),
+      "'use strict';\n\nmodule.exports = require('./lib/core');\n",
+      "utf8",
+    );
+    await writeFile(
+      join(workspaceRoot, "lib", "core.js"),
+      "function core(input) {\n  return input;\n}\nmodule.exports = core;\n",
+      "utf8",
+    );
+
+    const { index } = await buildContextIndex(workspaceRoot);
+    const entry = index.files.find((file) => file.path === "posix.js");
+    const target = index.files.find((file) => file.path === "lib/core.js");
+
+    assert.ok(entry, "thin re-export entry should be indexed");
+    assert.ok(target, "re-export target should be indexed");
+    assert.equal(entry.symbols.some((symbol) => symbol.name === "core" && symbol.exported), true,
+      "thin entry should inherit the target module's exported symbols");
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});

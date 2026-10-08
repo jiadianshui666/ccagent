@@ -11,7 +11,7 @@ import {
 import { shouldExcludeWorkspaceEntry } from "./tools/listFiles.js";
 import { extractSymbols, type WorkspaceSymbol } from "./tools/symbols.js";
 
-const CONTEXT_INDEX_VERSION = 10;
+const CONTEXT_INDEX_VERSION = 11;
 const CONTEXT_INDEX_DIR = ".ccagent/index";
 const CONTEXT_INDEX_FILE = "context-index.json";
 const MAX_FILES_SCANNED = 1_500;
@@ -25,6 +25,7 @@ const MAX_GRAPH_EXPANSIONS = 10;
 const MAX_GRAPH_DEPTH = 2;
 const MAX_GRAPH_RELATIONS = 40;
 const MAX_GRAPH_RELATIONS_PER_RESULT = 4;
+const MAX_INHERITED_REEXPORT_SYMBOLS = 50;
 const TEXT_EXTENSIONS = new Set([
   "",
   ".cjs",
@@ -45,7 +46,7 @@ const TEXT_EXTENSIONS = new Set([
   ".yaml",
   ".yml",
 ]);
-const SUPPORTED_CONTEXT_INDEX_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, CONTEXT_INDEX_VERSION]);
+const SUPPORTED_CONTEXT_INDEX_VERSIONS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, CONTEXT_INDEX_VERSION]);
 const MODULE_REFERENCE_KINDS = new Set<LocalModuleReferenceKind>([
   "dynamic import",
   "import",
@@ -206,6 +207,7 @@ export async function buildContextIndex(workspaceRoot: string): Promise<{
     pathSetChanged,
     moduleResolutionFingerprint,
   );
+  inheritReExportSymbols(indexedFiles, graphEdges.moduleEdges);
   const index: ContextIndex = {
     builtAt: new Date().toISOString(),
     files: indexedFiles.sort((left, right) => left.path.localeCompare(right.path)),
@@ -234,6 +236,44 @@ export async function buildContextIndex(workspaceRoot: string): Promise<{
     index,
     path: paths.relativePath,
   };
+}
+
+// Thin re-export entries such as `module.exports = require('./target')` or
+// `export * from './target'` extract no symbols of their own, so lexical and
+// graph retrieval can never surface them (e.g. picomatch's `posix.js`). Forward
+// the target module's exported symbols onto such entries so queries for the
+// re-exported surface still rank them.
+function inheritReExportSymbols(
+  files: ContextIndexFile[],
+  moduleEdges: ContextIndexModuleEdge[],
+): void {
+  const fileByPath = new Map(files.map((file) => [file.path, file]));
+  const forwardKinds = new Set<LocalModuleReferenceKind>(["re-export", "require"]);
+
+  for (const edge of moduleEdges) {
+    if (!forwardKinds.has(edge.kind)) {
+      continue;
+    }
+
+    const importer = fileByPath.get(edge.fromPath);
+    const target = fileByPath.get(edge.toPath);
+
+    if (!importer || !target) {
+      continue;
+    }
+
+    if (importer.symbols.length > 0) {
+      continue;
+    }
+
+    const exportedTarget = target.symbols.filter((symbol) => symbol.exported);
+
+    if (exportedTarget.length === 0) {
+      continue;
+    }
+
+    importer.symbols = exportedTarget.slice(0, MAX_INHERITED_REEXPORT_SYMBOLS);
+  }
 }
 
 export async function getContextIndexStatus(workspaceRoot: string): Promise<ContextIndexStatus> {
