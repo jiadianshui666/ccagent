@@ -203,6 +203,8 @@ npm run typecheck
 npm run build
 npm run ci
 npm test
+npm run coverage
+npm run audit
 npm run check
 npm run check:full
 npm run release:check
@@ -1748,7 +1750,11 @@ model, no API keys needed), an offline eval regression gate
 configured duration delta in `--strict` mode, with suite coverage checks),
 the committed baseline gate (`npm run baseline:gate`: a fresh smoke report
 gated against `tests/fixtures/eval-baseline-smoke.json` in `--strict` mode),
-and `npm run release:check`.
+and `npm run release:check`. On the Ubuntu / Node 24 leg the job also enforces
+a line-coverage threshold (`npm run coverage`, excluding `tests/`, `dist/`,
+and `node_modules/`) and fails on high-or-critical dependency vulnerabilities
+(`npm run audit`). Dependabot opens weekly npm and GitHub Actions update pull
+requests (`.github/dependabot.yml`).
 
 Live provider smoke tests need real API credentials, so they are excluded
 from the default matrix. Trigger them from the Actions tab with "Run
