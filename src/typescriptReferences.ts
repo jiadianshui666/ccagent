@@ -116,12 +116,16 @@ export function buildTypeScriptSymbolEdges(
       continue;
     }
 
-    sourceBytes += Buffer.byteLength(content, "utf8");
+    const nextBytes = sourceBytes + Buffer.byteLength(content, "utf8");
 
-    if (sourceInputs.length >= MAX_TYPECHECKER_FILES || sourceBytes > MAX_TYPECHECKER_SOURCE_BYTES) {
-      return [];
+    // Stop collecting once the budget is exhausted, but keep the files already
+    // gathered so large repositories still get partial TypeChecker coverage
+    // instead of dropping symbol edges entirely.
+    if (sourceInputs.length >= MAX_TYPECHECKER_FILES || nextBytes > MAX_TYPECHECKER_SOURCE_BYTES) {
+      break;
     }
 
+    sourceBytes = nextBytes;
     sourceInputs.push({ ...file, content });
   }
 

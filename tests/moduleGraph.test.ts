@@ -151,3 +151,41 @@ test("buildTypeScriptSymbolEdges links barrel imports to their final declaration
     },
   ]);
 });
+
+test("buildTypeScriptSymbolEdges keeps partial coverage past the file budget", async () => {
+  const workspaceRoot = resolve("module-graph-typechecker-budget");
+  const files = [
+    {
+      absolutePath: resolve(workspaceRoot, "src/service.ts"),
+      content: "export class Service { run() { return true; } }\n",
+      path: "src/service.ts",
+    },
+    {
+      absolutePath: resolve(workspaceRoot, "src/barrel.ts"),
+      content: "export { Service } from './service';\n",
+      path: "src/barrel.ts",
+    },
+    {
+      absolutePath: resolve(workspaceRoot, "src/consumer.ts"),
+      content: "import { Service } from './barrel';\nexport function use() { return new Service(); }\n",
+      path: "src/consumer.ts",
+    },
+  ];
+
+  // Push the source file count past the TypeChecker budget (500). The barrel
+  // reference above must still resolve consumer -> service instead of dropping
+  // all symbol edges.
+  for (let index = 0; index < 500; index += 1) {
+    files.push({
+      absolutePath: resolve(workspaceRoot, `src/pad-${index}.ts`),
+      content: `export const pad${index} = ${index};\n`,
+      path: `src/pad-${index}.ts`,
+    });
+  }
+
+  const moduleEdges = await buildLocalModuleEdges(workspaceRoot, files);
+  const symbolEdges = await buildTypeScriptSymbolEdges(workspaceRoot, files, moduleEdges);
+
+  assert.ok(symbolEdges.length > 0, "expected partial symbol-edge coverage instead of dropping all edges");
+  assert.equal(symbolEdges.some((edge) => edge.fromPath === "src/consumer.ts" && edge.toPath === "src/service.ts"), true);
+});
