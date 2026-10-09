@@ -1756,6 +1756,13 @@ and `node_modules/`) and fails on high-or-critical dependency vulnerabilities
 (`npm run audit`). Dependabot opens weekly npm and GitHub Actions update pull
 requests (`.github/dependabot.yml`).
 
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
+so `npm run release` can infer version bumps. A Husky `commit-msg` hook
+(installed automatically by the `prepare` script) runs commitlint locally,
+and a dedicated CI job lints pushed and pull-request commits. Valid types
+include `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `chore`, `ci`,
+and `build`; append `!` or a `BREAKING CHANGE` footer for major bumps.
+
 Live provider smoke tests need real API credentials, so they are excluded
 from the default matrix. Trigger them from the Actions tab with "Run
 workflow" and tick `run_provider_smoke`; supply `OPENAI_API_KEY` as a secret

@@ -28,6 +28,7 @@
     "test": "node scripts/test.mjs",
     "coverage": "node scripts/coverage.mjs",
     "audit": "npm audit --audit-level=high",
+    "prepare": "husky",
     "prepublishOnly": "npm run release:full",
     "test:benchmark": "npm run evals:benchmark",
     "ci": "npm run build && npm test && npm run baseline:gate && npm run release:check && npm run provider:ci",
@@ -66,7 +67,10 @@
     "release:full": "npm run build && npm test && npm run evals:smoke && node scripts/release-check.mjs"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.3",
+    "@commitlint/config-conventional": "^21.2.3",
     "@types/node": "^24.0.0",
+    "husky": "^9.1.7",
     "tsx": "^4.20.0"
   },
   "dependencies": {
