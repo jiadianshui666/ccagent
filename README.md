@@ -1798,5 +1798,21 @@ npm publish --dry-run
 npm publish
 ```
 
+Releases are automated with `npm run release`:
+
+```bash
+npm run release                # infers the bump from conventional commits
+npm run release patch          # explicit bump level
+npm run release minor --dry-run
+```
+
+`npm run release` computes the next version (major on a breaking change,
+minor on any `feat:`, patch otherwise), bumps `package.json` and
+`package-lock.json`, regenerates `CHANGELOG.md` from the conventional commits
+since the last tag, commits `chore(release): v<version>`, and tags `v<version>`.
+Pushing the tag triggers `.github/workflows/release.yml`, which publishes to npm
+using the `NPM_TOKEN` secret; `npm publish` still runs `prepublishOnly`
+(`npm run release:full`) as the final gate before anything reaches the registry.
+
 The package is MIT-licensed (see `LICENSE`). `npm publish` requires an npm
 account (`npm login`) and an available package name.
