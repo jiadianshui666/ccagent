@@ -61,6 +61,7 @@
     "provider:repair:gate": "tsx src/index.ts --no-session /provider-repair-gate",
     "provider:ci": "npm run provider:report && npm run provider:report && npm run provider:gate",
     "retrieval:manifests": "node scripts/retrieval-manifests-run.mjs",
+    "release": "node scripts/release.mjs",
     "release:check": "npm run build && node scripts/release-check.mjs",
     "release:full": "npm run build && npm test && npm run evals:smoke && node scripts/release-check.mjs"
   },
