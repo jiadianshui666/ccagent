@@ -2445,7 +2445,10 @@ async function evalRepairLoopStaleImportContract(): Promise<string> {
     expect(failed.content.includes("status: failed (exitCode=1)"), "expected initial stale import test to fail");
     expect(failed.content.includes("Cannot find module './tax'"), "expected missing old import path");
     expect(model.userMessages[0]?.includes("Initial repair file context"), "expected initial file context in repair prompt");
-    expect(model.userMessages[0]?.includes("require('./tax')"), "expected repair prompt to include stale import context");
+    expect(
+      model.userMessages[0]?.includes("require('./tax')"),
+      `expected repair prompt to include stale import context; prompt snippet: ${JSON.stringify(model.userMessages[0]?.slice(-1200))}`,
+    );
     expect(repaired.content.includes("Repair loop"), "expected repair loop output");
     expect(repaired.content.includes("Patch:\n  applied: yes\n  paths: src/orders.js"), "expected caller import patch");
     expect(repaired.content.includes("status: passed"), "expected repaired verification to pass");
