@@ -206,7 +206,11 @@ test("runOfflineEvals runs the full regression suite and a configurable benchmar
   const benchmark = await runOfflineEvals("benchmark", { iterations: 1, tag: "tool" });
 
   assert.equal(regression.suite, "regression");
-  assert.equal(regression.failed, 0);
+  assert.equal(
+    regression.failed,
+    0,
+    `regression failures: ${JSON.stringify(regression.results.filter((result) => result.status !== "pass"))}`,
+  );
   assert.equal(regression.results.length, 26);
   assert.equal(regression.results.some((item) => item.name === "context_graph_retrieval"), true);
   assert.equal(regression.results.some((item) => item.name === "plan_update"), true);

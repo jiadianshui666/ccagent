@@ -864,6 +864,8 @@ export async function exportAuditData(
   ].join("\n");
 }
 
+let nextAuditReportExportSequence = 1;
+
 export async function exportAuditReport(
   workspaceRoot: string,
   options: ExportAuditReportOptions = {},
@@ -878,7 +880,7 @@ export async function exportAuditReport(
   const parsed = await readAuditLogs(logsDir, logFiles);
   const exportedAt = new Date().toISOString();
   const reportsDir = join(workspaceRoot, ".ccagent", "reports");
-  const fileName = `audit-report-${formatExportTimestamp(exportedAt)}.md`;
+  const fileName = `audit-report-${formatExportTimestamp(exportedAt)}-${nextAuditReportExportSequence++}.md`;
   const content = buildAuditMarkdownReport({
     all: options.all,
     events: parsed.events,
