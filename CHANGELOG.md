@@ -35,6 +35,10 @@ First packaged release of CCAgent, a learning-focused terminal coding agent.
 - Windows process cleanup and MCP timeouts made retry-safe.
 - Provider errors classify authentication, quota, context-length, model-not-found, and TLS signatures.
 - Chat responses fall back to reasoning_content when content is empty on reasoning-model relays.
+- Verification repair context reads files through symlinked temp paths (macOS `/private/var`, Windows short names).
+- Suggested verification fixtures report stable exit codes and summaries across Windows and Linux.
+- Audit exports no longer overwrite each other when two reports are exported within the same millisecond.
+- CI lints only the pushed commit range instead of the full repository history.
 
 ### Security
 - web_fetch blocks private hosts, validates redirects, and limits hops against SSRF.
