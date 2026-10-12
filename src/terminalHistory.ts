@@ -154,7 +154,7 @@ export function getTerminalHistoryPath(workspaceRoot: string): string {
 }
 
 function normalizeTerminalHistoryEntry(entry: string): string {
-  return entry.replaceAll("\r", "").trim();
+  return entry.replaceAll("\r", "").replace(/\s+/g, " ").trim();
 }
 
 function looksSensitive(value: string): boolean {

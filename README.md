@@ -29,6 +29,12 @@ named `review`. `/skill c<Tab>` can complete a project skill named
 Use `/completion` or `/keys` to inspect Tab completion behavior and terminal
 input shortcuts from inside CCAgent.
 
+End an input line with a single trailing backslash (`\`) to continue typing on
+the next line. The backslash is removed and the continuation lines are joined
+with newlines before the message is sent. A trailing `\\` (two backslashes)
+stays literal and does not continue the input. Ctrl+C cancels a pending
+multi-line input and returns to a fresh prompt.
+
 Tab also completes workspace paths for path-oriented commands. For example,
 `/read src/<Tab>` can complete files under `src/`, while `/ls s<Tab>` and
 `/tree s<Tab>` complete directories. The same noisy paths hidden by `list_files`,

@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { ToolAuditEvent } from "../src/audit.js";
-import { loadCheckpointCompletionNames } from "../src/cli.js";
+import { foldContinuationLine, hasContinuingBackslash, loadCheckpointCompletionNames } from "../src/cli.js";
 
 type CliRunResult = {
   exitCode: number | null;
@@ -1616,6 +1616,77 @@ test("interactive CLI persists terminal input history", async () => {
   }
 });
 
+test("continuation helpers treat only odd trailing backslashes as continuing", () => {
+  assert.equal(hasContinuingBackslash(""), false);
+  assert.equal(hasContinuingBackslash("plain line"), false);
+  assert.equal(hasContinuingBackslash("plain line    "), false);
+  assert.equal(hasContinuingBackslash("single \\"), true);
+  assert.equal(hasContinuingBackslash("single \\   "), true);
+  assert.equal(hasContinuingBackslash("double \\\\"), false);
+  assert.equal(hasContinuingBackslash("triple \\\\\\"), true);
+  assert.equal(foldContinuationLine("first part \\", "second part"), "first part \nsecond part");
+  assert.equal(foldContinuationLine("first part \\  ", "second part"), "first part \nsecond part");
+});
+
+test("interactive CLI joins backslash-continuation lines into one message", async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-cli-multiline-"));
+
+  try {
+    const result = await runInteractiveCli(workspaceRoot, [
+      "first part \\",
+      "second part",
+      "last \\\\",
+      "exit",
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /You said: first part \nsecond part/);
+    assert.match(result.stdout, /You said: last \\\\/);
+    assert.match(result.stdout, /Bye\./);
+
+    const rawHistory = await readFile(join(workspaceRoot, ".ccagent", "history"), "utf8");
+
+    assert.match(rawHistory, /first part second part/);
+    assert.match(rawHistory, /last \\\\/);
+
+    const help = await runCli(workspaceRoot, ["--no-session", "/help", "completion"]);
+
+    assert.match(help.stdout, /Continue typing on the next line/);
+    assert.match(help.stdout, /Cancel a pending multi-line input/);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test(
+  "interactive CLI cancels a pending multi-line input on SIGINT",
+  { skip: process.platform === "win32" },
+  async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-cli-multiline-cancel-"));
+
+    try {
+      const result = await runInteractiveCliWithSigintCancel(
+        workspaceRoot,
+        ["first part \\"],
+        (child, stdin) => {
+          child.kill("SIGINT");
+
+          setTimeout(() => {
+            stdin.end(["second part", "exit"].join("\n") + "\n");
+          }, 150);
+        },
+      );
+
+      assert.equal(result.exitCode, 0);
+      assert.doesNotMatch(result.stdout, /You said: first part/);
+      assert.match(result.stdout, /You said: second part/);
+      assert.match(result.stdout, /Bye\./);
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  },
+);
+
 test("CLI stores, reports, and removes a persisted API key with login and logout", async () => {
   const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-cli-login-"));
   const authPath = join(workspaceRoot, "user-home", "auth.json");
@@ -1794,6 +1865,60 @@ async function runInteractiveCli(
       });
     });
     child.stdin.end(`${lines.join("\n")}\n`);
+  });
+}
+
+async function runInteractiveCliWithSigintCancel(
+  workspaceRoot: string,
+  firstLines: string[],
+  onContinuation: (child: ChildProcess, stdin: NodeJS.WritableStream) => void,
+  timeoutMs = 8000,
+): Promise<CliRunResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [tsxCliPath, sourceCliPath], {
+      cwd: workspaceRoot,
+      env: {
+        ...process.env,
+        CCAGENT_USER_DIR: join(workspaceRoot, "user-home"),
+        OPENAI_API_KEY: "",
+        OPENAI_BASE_URL: "",
+        CCAGENT_API_MODE: "",
+        CCAGENT_MODEL: "",
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let signalSent = false;
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error("interactive CLI with SIGINT timed out"));
+    }, timeoutMs);
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout.push(chunk);
+
+      if (!signalSent && chunk.toString("utf8").includes("... > ")) {
+        signalSent = true;
+        onContinuation(child, child.stdin);
+      }
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr.push(chunk);
+    });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on("close", (exitCode) => {
+      clearTimeout(timeout);
+      resolve({
+        exitCode,
+        stdout: Buffer.concat(stdout).toString("utf8"),
+        stderr: Buffer.concat(stderr).toString("utf8"),
+      });
+    });
+    child.stdin.write(`${firstLines.join("\n")}\n`);
   });
 }
 

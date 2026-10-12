@@ -220,9 +220,40 @@ import {
   type TerminalHistoryState,
 } from "./terminalHistory.js";
 
+const INPUT_CANCELLED = Symbol("ccagent.input-cancelled");
+
+type ReadOutcome = string | null | typeof INPUT_CANCELLED;
+
+type ReadOptions = {
+  keepReadlineHistory?: boolean;
+  onInput?: (line: string) => void | Promise<void>;
+  promptLine?: (prompt: string) => void | Promise<void>;
+};
+
+export function hasContinuingBackslash(line: string): boolean {
+  const trimmed = line.trimEnd();
+  let count = 0;
+
+  for (let index = trimmed.length - 1; index >= 0 && trimmed[index] === "\\"; index -= 1) {
+    count += 1;
+  }
+
+  return count % 2 === 1;
+}
+
+export function foldContinuationLine(base: string, next: string): string {
+  return `${base.trimEnd().slice(0, -1)}\n${next}`;
+}
+
 class LineReader {
   private readonly iterator: AsyncIterator<string>;
+  private readonly inbox: ReadOutcome[] = [];
+  private readonly waiters: Array<(outcome: ReadOutcome) => void> = [];
   private pinnedHistory: string[] | null = null;
+  private awaitingContinuation = false;
+  private closed = false;
+  private interrupted = false;
+  private pumpStarted = false;
 
   constructor(
     private readonly rl: Interface,
@@ -237,14 +268,47 @@ class LineReader {
     }
   }
 
-  async read(
-    prompt: string,
-    options: {
-      keepReadlineHistory?: boolean;
-      onInput?: (line: string) => void | Promise<void>;
-      promptLine?: (prompt: string) => void | Promise<void>;
-    } = {},
-  ): Promise<string | null> {
+  async read(prompt: string, options: ReadOptions = {}): Promise<string | null> {
+    const outcome = await this.takeTurn(prompt, options, false);
+
+    return outcome === INPUT_CANCELLED ? null : outcome;
+  }
+
+  async readContinuation(prompt: string, options: ReadOptions = {}): Promise<ReadOutcome> {
+    return this.takeTurn(prompt, options, true);
+  }
+
+  isAwaitingContinuation(): boolean {
+    return this.awaitingContinuation;
+  }
+
+  cancelPendingInput(): void {
+    const waiter = this.waiters.shift();
+
+    if (waiter) {
+      waiter(INPUT_CANCELLED);
+    } else {
+      this.interrupted = true;
+    }
+
+    this.clearInterruptedLine();
+  }
+
+  setHistory(entries: string[]): void {
+    this.pinnedHistory = [...entries];
+
+    const rlWithHistory = this.rl as Interface & { history?: string[] };
+
+    if (Array.isArray(rlWithHistory.history)) {
+      rlWithHistory.history.splice(0, rlWithHistory.history.length, ...entries);
+    }
+  }
+
+  close(): void {
+    this.rl.close();
+  }
+
+  private async takeTurn(prompt: string, options: ReadOptions, continuation: boolean): Promise<ReadOutcome> {
     this.rl.setPrompt(prompt);
 
     const stopListeningForInput =
@@ -262,41 +326,90 @@ class LineReader {
           })()
         : () => undefined;
 
-    if (options.promptLine) {
-      await options.promptLine(prompt);
-    } else {
-      this.outputStream.write(prompt);
+    if (continuation) {
+      this.awaitingContinuation = true;
     }
 
-    try {
-      const next = await this.iterator.next();
+    this.startPump();
 
-      if (next.done) {
-        return null;
+    try {
+      if (options.promptLine) {
+        await options.promptLine(prompt);
+      } else {
+        this.outputStream.write(prompt);
       }
+
+      if (this.interrupted) {
+        this.interrupted = false;
+        return INPUT_CANCELLED;
+      }
+
+      const outcome = this.inbox.shift() ?? (this.closed ? null : await this.waitForEntry());
 
       if (!options.keepReadlineHistory && this.pinnedHistory) {
         this.setHistory(this.pinnedHistory);
       }
 
-      return next.value;
+      return outcome;
     } finally {
+      if (continuation) {
+        this.awaitingContinuation = false;
+      }
+
       stopListeningForInput();
     }
   }
 
-  setHistory(entries: string[]): void {
-    this.pinnedHistory = [...entries];
+  private waitForEntry(): Promise<ReadOutcome> {
+    return new Promise((resolve) => {
+      this.waiters.push(resolve);
+    });
+  }
 
-    const rlWithHistory = this.rl as Interface & { history?: string[] };
+  private startPump(): void {
+    if (this.pumpStarted || this.closed) {
+      return;
+    }
 
-    if (Array.isArray(rlWithHistory.history)) {
-      rlWithHistory.history.splice(0, rlWithHistory.history.length, ...entries);
+    this.pumpStarted = true;
+    void this.consumeInput().catch(() => undefined);
+  }
+
+  private async consumeInput(): Promise<void> {
+    for (;;) {
+      const next = await this.iterator.next();
+
+      if (next.done) {
+        this.closed = true;
+
+        while (this.waiters.length > 0) {
+          this.waiters.shift()?.(null);
+        }
+
+        return;
+      }
+
+      const waiter = this.waiters.shift();
+
+      if (waiter) {
+        waiter(next.value);
+      } else {
+        this.inbox.push(next.value);
+      }
     }
   }
 
-  close(): void {
-    this.rl.close();
+  private clearInterruptedLine(): void {
+    const iface = this.rl as unknown as {
+      line: string;
+      cursor: number;
+      _refreshLine?: () => void;
+    };
+
+    iface.line = "";
+    iface.cursor = 0;
+    iface._refreshLine?.();
+    this.outputStream.write("\r\x1b[2K");
   }
 }
 
@@ -718,6 +831,11 @@ export async function startCli(argv: string[] = []): Promise<void> {
       return;
     }
 
+    if (reader.isAwaitingContinuation()) {
+      reader.cancelPendingInput();
+      return;
+    }
+
     if (!runtime || sigintExiting) {
       return;
     }
@@ -1059,7 +1177,7 @@ async function runInteractive(runtime: Runtime, reader: LineReader): Promise<voi
       });
     }
 
-    const message = await reader.read("CCAgent > ", {
+    let message: string | null = await reader.read("CCAgent > ", {
       promptLine: runtime.renderer.writePromptLine?.bind(runtime.renderer),
       onInput: (line) => {
         const matches = completeSlashCommandHints(line.trimStart());
@@ -1067,8 +1185,39 @@ async function runInteractive(runtime: Runtime, reader: LineReader): Promise<voi
       },
     });
 
+    let cancelled = false;
+
+    if (message !== null) {
+      while (hasContinuingBackslash(message)) {
+        const next = await reader.readContinuation("... > ", {
+          keepReadlineHistory: true,
+          promptLine: runtime.renderer.writePromptLine?.bind(runtime.renderer),
+          onInput: (line) => {
+            const matches = completeSlashCommandHints(line.trimStart());
+            runtime.renderer.redrawHints?.(matches.length > 0 ? matches : hints);
+          },
+        });
+
+        if (next === INPUT_CANCELLED) {
+          cancelled = true;
+          break;
+        }
+
+        if (next === null) {
+          message = null;
+          break;
+        }
+
+        message = foldContinuationLine(message, next);
+      }
+    }
+
     if (message === null) {
       break;
+    }
+
+    if (cancelled) {
+      continue;
     }
 
     runtime.turnController = new AbortController();
