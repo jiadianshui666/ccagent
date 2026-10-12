@@ -39,6 +39,7 @@ First packaged release of CCAgent, a learning-focused terminal coding agent.
 - Suggested verification fixtures report stable exit codes and summaries across Windows and Linux.
 - Audit exports no longer overwrite each other when two reports are exported within the same millisecond.
 - CI lints only the pushed commit range instead of the full repository history.
+- Parallel subagent write conflicts are reported even when one racing edit fails to apply.
 
 ### Security
 - web_fetch blocks private hosts, validates redirects, and limits hops against SSRF.

@@ -1705,6 +1705,12 @@ export class Agent {
       }
     }
 
+    if (!result.ok && (name === "apply_patch" || name === "edit")) {
+      for (const path of this.collectEditPaths(name, input)) {
+        this.writtenPaths.add(path);
+      }
+    }
+
     if (name === "reverse_patch" && result.ok) {
       this.lastPatch = undefined;
     }
