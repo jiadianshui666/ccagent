@@ -1264,9 +1264,10 @@ test("CLI runs provider smoke without saving session history", async () => {
     assert.equal(parsed.probes[2]?.toolCalls.includes("smoke_ping"), true);
     assert.equal(fullSmoke.exitCode, 0);
     assert.match(fullSmoke.stdout, /Profile: full/);
-    assert.match(fullSmoke.stdout, /Summary: 5 passed, 0 failed/);
+    assert.match(fullSmoke.stdout, /Summary: 6 passed, 0 failed/);
     assert.match(fullSmoke.stdout, /\[PASS\] unicode \(\d+ms\): text response returned/);
     assert.match(fullSmoke.stdout, /\[PASS\] streaming-tool-call \(\d+ms\): streaming smoke_ping tool call returned/);
+    assert.match(fullSmoke.stdout, /\[PASS\] tool-followup \(\d+ms\): follow-up turn returned text \(9 chars\)/);
     assert.equal(savedQuickSmoke.exitCode, 0);
     assert.match(savedQuickSmoke.stdout, /Saved report:/);
     assert.equal(savedFullSmoke.exitCode, 0);
@@ -1326,13 +1327,13 @@ test("CLI runs provider smoke without saving session history", async () => {
     assert.equal(savedReport.summary.profile, "full");
     assert.equal(savedReport.summary.compatibility.status, "mock-only");
     assert.equal(savedReport.summary.diagnosis.status, "needs-real-run");
-    assert.equal(savedReport.summary.passed, 5);
+    assert.equal(savedReport.summary.passed, 6);
     assert.equal(savedReport.summary.failed, 0);
     assert.equal(savedReport.summary.probes.some((probe) => probe.name === "unicode"), true);
     assert.equal(providerReports.exitCode, 0);
     assert.match(providerReports.stdout, /Provider smoke reports/);
     assert.match(providerReports.stdout, /Count: 2/);
-    assert.match(providerReports.stdout, /full .+ client=mock model=gpt-5\.5 mode=responses passed=5 failed=0/);
+    assert.match(providerReports.stdout, /full .+ client=mock model=gpt-5\.5 mode=responses passed=6 failed=0/);
     assert.equal(providerReportsJson.exitCode, 0);
     const parsedProviderReports = JSON.parse(providerReportsJson.stdout) as {
       reports: Array<{
@@ -1348,7 +1349,7 @@ test("CLI runs provider smoke without saving session history", async () => {
     assert.equal(parsedProviderReports.reports.length, 2);
     assert.match(parsedProviderReports.reports[0]?.path ?? "", /^\.ccagent\/reports\/provider-smoke-.+\.md$/);
     assert.equal(parsedProviderReports.reports[0]?.summary.profile, "full");
-    assert.equal(parsedProviderReports.reports[0]?.summary.passed, 5);
+    assert.equal(parsedProviderReports.reports[0]?.summary.passed, 6);
     assert.equal(parsedProviderReports.reports[0]?.summary.failed, 0);
     assert.equal(emptyProfiles.exitCode, 0);
     assert.match(emptyProfiles.stdout, /Provider profiles/);
@@ -1389,7 +1390,7 @@ test("CLI runs provider smoke without saving session history", async () => {
     assert.match(providerCompare.stdout, /Provider smoke comparison/);
     assert.match(providerCompare.stdout, /Status: IMPROVED/);
     assert.match(providerCompare.stdout, /Profile: quick -> full/);
-    assert.match(providerCompare.stdout, /Passed: 3 -> 5/);
+    assert.match(providerCompare.stdout, /Passed: 3 -> 6/);
     assert.match(providerCompare.stdout, /- unicode: missing -> PASS/);
     assert.equal(providerCompareJson.exitCode, 0);
     const parsedProviderCompare = JSON.parse(providerCompareJson.stdout) as {
@@ -1459,7 +1460,7 @@ test("CLI runs provider smoke without saving session history", async () => {
       probes: Array<{ name: string; ok: boolean }>;
     };
     assert.equal(fullParsed.profile, "full");
-    assert.equal(fullParsed.passed, 5);
+    assert.equal(fullParsed.passed, 6);
     assert.equal(fullParsed.failed, 0);
     assert.deepEqual(fullParsed.probes.map((probe) => probe.name), [
       "text",
@@ -1467,6 +1468,7 @@ test("CLI runs provider smoke without saving session history", async () => {
       "streaming",
       "tool-call",
       "streaming-tool-call",
+      "tool-followup",
     ]);
     assert.equal(fullParsed.probes.every((probe) => probe.ok), true);
     await assert.rejects(

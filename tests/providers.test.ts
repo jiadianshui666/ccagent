@@ -27,6 +27,9 @@ test("provider compatibility matrix includes active relay guidance", () => {
   assert.match(output, /switch to chat if relay errors mention Responses or previous_response_id/);
   assert.match(output, /generic-chat-relay: Generic OpenAI-compatible relay/);
   assert.match(output, /responses-compatible-relay: Responses-compatible relay/);
+  assert.match(output, /Built-in provider profiles/);
+  assert.match(output, /- volcengine: Volcengine Ark/);
+  assert.match(output, /- openrouter: OpenRouter/);
 });
 
 test("provider smoke diagnosis explains relay and probe failures", () => {
@@ -61,6 +64,13 @@ test("provider smoke diagnosis explains relay and probe failures", () => {
         summary: "missing smoke_ping tool call",
         tool: true,
       },
+      {
+        name: "tool-followup",
+        ok: false,
+        stream: false,
+        summary: "text response did not include CONTINUED",
+        tool: false,
+      },
     ],
   });
   const output = formatProviderSmokeDiagnosis(diagnosis).join("\n");
@@ -68,9 +78,10 @@ test("provider smoke diagnosis explains relay and probe failures", () => {
   assert.equal(diagnosis.status, "failing");
   assert.match(output, /Provider diagnosis/);
   assert.match(output, /Responses mode on custom relays requires \/v1\/responses/);
-  assert.match(output, /Failed probes: streaming, tool-call/);
+  assert.match(output, /Failed probes: streaming, tool-call, tool-followup/);
   assert.match(output, /forwards SSE streaming/);
   assert.match(output, /support function\/tool calls/);
+  assert.match(output, /multi-turn tool continuity/);
 });
 
 test("provider smoke compatibility profile summarizes known-good capability status", () => {
@@ -90,12 +101,14 @@ test("provider smoke compatibility profile summarizes known-good capability stat
       { name: "streaming", ok: true, stream: true, summary: "stream ok", tool: false },
       { name: "tool-call", ok: true, stream: false, summary: "tool ok", tool: true },
       { name: "streaming-tool-call", ok: true, stream: true, summary: "streaming tool ok", tool: true },
+      { name: "tool-followup", ok: true, stream: false, summary: "follow-up turn returned text (9 chars)", tool: false },
     ],
   });
   const output = formatProviderSmokeCompatibilityProfile(profile).join("\n");
 
   assert.equal(profile.status, "known-good");
   assert.equal(profile.capabilities.every((capability) => capability.status === "pass"), true);
+  assert.equal(profile.capabilities.find((capability) => capability.name === "tool-followup")?.status, "pass");
   assert.match(output, /Compatibility profile/);
   assert.match(output, /Status: known-good/);
   assert.match(output, /text: pass - text ok/);

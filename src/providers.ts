@@ -1,4 +1,5 @@
 import type { OpenAIApiMode } from "./model.js";
+import { PROVIDER_PROFILE_IDS, PROVIDER_PROFILES } from "./providerProfiles.js";
 
 export type ProviderCompatibilityRuntime = {
   apiMode: OpenAIApiMode;
@@ -137,6 +138,12 @@ export function formatProviderCompatibilityMatrix(runtime: ProviderCompatibility
     "",
     "Profiles:",
     ...PROVIDER_COMPATIBILITY_ENTRIES.flatMap(formatProviderCompatibilityEntry),
+    "",
+    "Built-in provider profiles (ccagent --provider <id>):",
+    ...PROVIDER_PROFILE_IDS.flatMap((profileId) => {
+      const profile = PROVIDER_PROFILES[profileId];
+      return [`- ${profile.id}: ${profile.name} (${profile.baseURL}, model ${profile.model})`];
+    }),
   ].join("\n");
 }
 
@@ -174,6 +181,8 @@ export function diagnoseProviderSmoke(input: ProviderSmokeDiagnosticInput): Prov
       actions.push("Use a model and relay that support function/tool calls; coding agents need this for workspace tools.");
     } else if (probe.name === "streaming-tool-call") {
       actions.push("If non-streaming tools pass, use non-streaming tool workflows until the relay streams tool deltas correctly.");
+    } else if (probe.name === "tool-followup") {
+      actions.push("Relay or model broke after tool results were submitted; confirm multi-turn tool continuity, then run /provider-repair for deeper checks.");
     } else if (probe.tool) {
       actions.push("Check tool/function-call support for the selected model and relay.");
     } else if (probe.stream) {
@@ -324,6 +333,7 @@ function buildProviderSmokeCapabilities(probes: ProviderSmokeDiagnosticProbe[]):
     "streaming",
     "tool-call",
     "streaming-tool-call",
+    "tool-followup",
   ].map((name) => {
     const probe = probeMap.get(name);
 

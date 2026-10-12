@@ -123,6 +123,7 @@ export type OpenAIChatCompletionsStreamToolCall = {
 export type OpenAIChatCompletionsStreamState = {
   responseId?: string;
   content: string;
+  reasoningContent: string;
   toolCalls: Record<number, OpenAIChatCompletionsStreamToolCall>;
   usage?: ModelUsage;
 };
@@ -297,6 +298,14 @@ export class MockModelClient implements ModelClient {
 
   private async createMockTurn(input: ModelTurnInput): Promise<ModelResult> {
     if (input.toolOutputs && input.toolOutputs.length > 0) {
+      if (input.toolOutputs.some((output) => output.callId === "mock-smoke-ping-1")) {
+        return {
+          content: "CONTINUED",
+          responseId: "mock-smoke-followup",
+          toolCalls: [],
+        };
+      }
+
       if (this.pendingTask) {
         return this.continuePendingTask(input.toolOutputs[0]);
       }
@@ -901,7 +910,22 @@ export function classifyModelProviderError(error: unknown): ModelProviderErrorCl
     typeof fields.status === "number" ? String(fields.status) : "",
   ].join(" ").toLowerCase();
 
-  if (fields.status === 401 || hasAny(haystack, ["invalid api key", "incorrect api key", "unauthorized"])) {
+  if (
+    fields.status === 401 ||
+    hasAny(haystack, [
+      "invalid api key",
+      "incorrect api key",
+      "invalid_api_key",
+      "api key is invalid",
+      "bad api key",
+      "authentication fails",
+      "authentication error",
+      "authentication_error",
+      "no such user",
+      "access token",
+      "unauthorized",
+    ])
+  ) {
     return buildProviderErrorClassification(fields, "authentication", false);
   }
 
@@ -917,11 +941,32 @@ export function classifyModelProviderError(error: unknown): ModelProviderErrorCl
     return buildProviderErrorClassification(fields, "authorization", false);
   }
 
-  if (fields.status === 400 || hasAny(haystack, ["bad request", "invalid_request", "invalid request"])) {
+  if (
+    fields.status === 400 ||
+    hasAny(haystack, [
+      "bad request",
+      "invalid_request",
+      "invalid request",
+      "context length",
+      "maximum context length",
+      "context_length_exceeded",
+    ])
+  ) {
     return buildProviderErrorClassification(fields, "bad_request", false);
   }
 
-  if (fields.status === 404 || hasAny(haystack, ["not found", "model_not_found", "unknown model"])) {
+  if (
+    fields.status === 404 ||
+    hasAny(haystack, [
+      "not found",
+      "model_not_found",
+      "model not found",
+      "invalid model",
+      "unknown model",
+      "engine not found",
+      "model engine not found",
+    ])
+  ) {
     return buildProviderErrorClassification(fields, "not_found", false);
   }
 
@@ -939,6 +984,10 @@ export function classifyModelProviderError(error: unknown): ModelProviderErrorCl
 
   if (typeof fields.status === "number" && fields.status >= 500) {
     return buildProviderErrorClassification(fields, "server_error", true);
+  }
+
+  if (hasAny(haystack, ["certificate", "tls handshake", "self-signed", "unable to verify"])) {
+    return buildProviderErrorClassification(fields, "network", false);
   }
 
   if (hasAny(haystack, ["econnreset", "eai_again", "socket hang up", "fetch failed", "network"])) {
@@ -1313,6 +1362,7 @@ export function buildOpenAIChatToolMessages(
 export function createOpenAIChatCompletionsStreamState(): OpenAIChatCompletionsStreamState {
   return {
     content: "",
+    reasoningContent: "",
     toolCalls: {},
   };
 }
@@ -1355,6 +1405,10 @@ export function updateOpenAIChatCompletionsStreamState(
       });
     }
 
+    if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) {
+      state.reasoningContent += delta.reasoning_content;
+    }
+
     const toolCalls = Array.isArray(delta.tool_calls) ? delta.tool_calls : [];
 
     for (const [fallbackIndex, toolCallDelta] of toolCalls.entries()) {
@@ -1380,6 +1434,8 @@ export function buildOpenAIChatCompletionsStreamResponse(
     }))
     .filter((toolCall) => toolCall.id.length > 0 || toolCall.function.name.length > 0);
 
+  const fallbackContent = state.content.length > 0 ? state.content : state.reasoningContent;
+
   return {
     id: state.responseId,
     ...(state.usage ? { usage: buildOpenAIChatCompletionUsage(state.usage) } : {}),
@@ -1387,7 +1443,7 @@ export function buildOpenAIChatCompletionsStreamResponse(
       {
         message: {
           role: "assistant",
-          content: state.content.length > 0 ? state.content : null,
+          content: fallbackContent.length > 0 ? fallbackContent : null,
           tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
         },
       },
@@ -1466,9 +1522,12 @@ export function parseOpenAIChatCompletionsResult(response: unknown): ModelResult
   const message = getFirstChatChoiceMessage(source);
   const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
   const usage = parseOpenAIChatCompletionUsage(source?.usage);
+  const content = typeof message?.content === "string" ? message.content : "";
+  const reasoningContent =
+    typeof message?.reasoning_content === "string" ? message.reasoning_content : "";
 
   return {
-    content: typeof message?.content === "string" ? message.content : "",
+    content: content.length > 0 ? content : reasoningContent,
     responseId: typeof source?.id === "string" ? source.id : undefined,
     ...(usage ? { usage } : {}),
     toolCalls: toolCalls.flatMap((toolCall) => {

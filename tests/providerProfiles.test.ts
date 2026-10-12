@@ -14,7 +14,19 @@ import {
 } from "../src/providerProfiles.js";
 
 test("provider profile catalog exposes the supported regions", () => {
-  assert.deepEqual([...PROVIDER_PROFILE_IDS].sort(), ["deepseek", "moonshot", "qwen", "zhipu"]);
+  assert.deepEqual([...PROVIDER_PROFILE_IDS].sort(), [
+    "deepseek",
+    "groq",
+    "minimax",
+    "mistral",
+    "moonshot",
+    "openrouter",
+    "qwen",
+    "siliconflow",
+    "volcengine",
+    "xai",
+    "zhipu",
+  ]);
   assert.equal(isProviderProfileId("deepseek"), true);
   assert.equal(isProviderProfileId("openai"), false);
 
@@ -36,7 +48,7 @@ test("--provider applies parsed profiles and rejects unknown ids", () => {
     assert.equal(parsed.providerId, "qwen");
   }
 
-  const invalid = parseCliArgs(["--provider", "openrouter"]);
+  const invalid = parseCliArgs(["--provider", "not-a-provider"]);
 
   assert.equal(invalid.mode, "providerError");
 

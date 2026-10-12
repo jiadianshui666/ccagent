@@ -91,6 +91,46 @@ test("classifyModelProviderError labels common provider failures", () => {
   }).kind, "server_error");
 
   assert.equal(classifyModelProviderError(new Error("fetch failed: ECONNRESET")).kind, "network");
+
+  assert.equal(classifyModelProviderError({
+    error: {
+      message: "Authentication Fails (no such user)",
+      type: "authentication_error",
+    },
+  }).kind, "authentication");
+
+  assert.equal(classifyModelProviderError({
+    error: {
+      code: "invalid_api_key",
+      message: "The api key provided is invalid",
+    },
+  }).kind, "authentication");
+
+  assert.equal(classifyModelProviderError({
+    status: 429,
+    error: {
+      message: "Rate limit exceeded for insufficient_quota",
+    },
+  }).kind, "authorization");
+
+  assert.equal(classifyModelProviderError({
+    error: {
+      message: "This model's maximum context length is 65536 tokens, however you requested 90000 tokens",
+    },
+  }).kind, "bad_request");
+
+  assert.equal(classifyModelProviderError({
+    error: {
+      code: "ModelNotExistError",
+      message: "model engine not found",
+    },
+  }).kind, "not_found");
+
+  assert.deepEqual(classifyModelProviderError(new Error("self-signed certificate in certificate chain")), {
+    kind: "network",
+    message: "self-signed certificate in certificate chain",
+    retryable: false,
+  });
 });
 
 test("runWithProviderRetries retries transient provider errors", async () => {
@@ -676,6 +716,116 @@ test("updateOpenAIChatCompletionsStreamState accumulates streamed tool calls", (
       },
     ],
   });
+});
+
+test("updateOpenAIChatCompletionsStreamState tolerates provider-specific deltas", () => {
+  const state = createOpenAIChatCompletionsStreamState();
+
+  // Reasoning models (DeepSeek-R1, Kimi K2 thinking modes) stream thought
+  // text in delta.reasoning_content with empty content.
+  assert.deepEqual(
+    updateOpenAIChatCompletionsStreamState(state, {
+      id: "chatcmpl_reasoning",
+      choices: [{ delta: { reasoning_content: "thinking", content: "" } }],
+    }),
+    [],
+  );
+
+  // Some relays send an empty final delta with finish_reason before usage.
+  assert.deepEqual(
+    updateOpenAIChatCompletionsStreamState(state, {
+      id: "chatcmpl_reasoning",
+      choices: [{ finish_reason: "stop", delta: { content: "" } }],
+    }),
+    [],
+  );
+
+  const events = updateOpenAIChatCompletionsStreamState(state, {
+    id: "chatcmpl_reasoning",
+    choices: [{ delta: { content: "done" } }],
+  });
+
+  assert.deepEqual(events, [{ type: "text_delta", delta: "done" }]);
+
+  updateOpenAIChatCompletionsStreamState(state, {
+    usage: {
+      prompt_tokens: 2,
+      completion_tokens: 1,
+      total_tokens: 3,
+    },
+    choices: [],
+  });
+
+  assert.deepEqual(parseOpenAIChatCompletionsResult(buildOpenAIChatCompletionsStreamResponse(state)), {
+    content: "done",
+    responseId: "chatcmpl_reasoning",
+    usage: {
+      inputTokens: 2,
+      outputTokens: 1,
+      totalTokens: 3,
+    },
+    toolCalls: [],
+  });
+});
+
+test("parseOpenAIChatCompletionsResult falls back to reasoning_content when content is empty", () => {
+  const reasonOnly = parseOpenAIChatCompletionsResult({
+    id: "chatcmpl_reason_only",
+    choices: [
+      {
+        message: {
+          role: "assistant",
+          content: "",
+          reasoning_content: "OK",
+        },
+      },
+    ],
+  });
+
+  assert.equal(reasonOnly.content, "OK");
+
+  const both = parseOpenAIChatCompletionsResult({
+    id: "chatcmpl_both",
+    choices: [
+      {
+        message: {
+          role: "assistant",
+          content: "OK",
+          reasoning_content: "thinking",
+        },
+      },
+    ],
+  });
+
+  assert.equal(both.content, "OK");
+});
+
+test("buildOpenAIChatCompletionsStreamResponse falls back to streamed reasoning content", () => {
+  const state = createOpenAIChatCompletionsStreamState();
+
+  assert.deepEqual(
+    updateOpenAIChatCompletionsStreamState(state, {
+      id: "chatcmpl_reason_stream",
+      choices: [{ delta: { reasoning_content: "think", content: "" } }],
+    }),
+    [],
+  );
+
+  updateOpenAIChatCompletionsStreamState(state, {
+    usage: {
+      prompt_tokens: 1,
+      completion_tokens: 1,
+      total_tokens: 2,
+    },
+    choices: [],
+  });
+
+  const result = parseOpenAIChatCompletionsResult(
+    buildOpenAIChatCompletionsStreamResponse(state),
+  );
+
+  assert.equal(result.content, "think");
+  assert.equal(result.responseId, "chatcmpl_reason_stream");
 });
 
 test("buildOpenAIResponsesStreamRequest enables streaming", () => {

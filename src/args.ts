@@ -336,7 +336,7 @@ export function formatCliUsage(): string {
     "                            Remove one configured MCP server.",
     "  ccagent --mcp-enable | --mcp-disable",
     "                            Enable or disable configured MCP servers.",
-    "  ccagent --provider <id>   Apply a provider profile (deepseek, moonshot, zhipu, qwen).",
+    "  ccagent --provider <id>   Apply a provider profile (deepseek, qwen, siliconflow, volcengine, openrouter, ...).",
     "  ccagent --no-session     Run without loading or saving session history.",
     "  ccagent --allow-edits    Auto-approve apply_patch, reverse_patch, and edit for this run.",
     "  ccagent --sandbox        Run shell commands inside a Docker container for this run.",

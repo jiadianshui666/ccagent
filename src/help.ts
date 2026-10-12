@@ -477,7 +477,7 @@ const HELP_TOPICS: HelpTopic[] = [
       "  ccagent --allow-edits       Auto-approve edit, apply_patch, and reverse_patch for one run.",
       "  ccagent --sandbox           Run run_shell commands inside a Docker container for one run.",
       "  ccagent --sandbox=mode      Sandbox mode: docker, podman, job (Windows), timeout (POSIX), or off.",
-      "  ccagent --provider <id>     Apply a provider profile (deepseek, moonshot, zhipu, qwen).",
+      "  ccagent --provider <id>     Apply a provider profile (deepseek, qwen, siliconflow, volcengine, openrouter, ...).",
       "  ccagent --verify <cmd>      Run a verification command after successful patches.",
       "  /verify-run [paths...]      Run suggested verification commands through run_shell approval.",
       "  /verify-last                Run suggested verification for the most recent patch.",

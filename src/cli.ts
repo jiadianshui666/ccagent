@@ -4416,12 +4416,14 @@ export async function runProviderSmoke(
 
   for (const definition of probeDefinitions) {
     client.reset?.();
-    const probe = await runSmokeProbe(client, {
-      allowStreamFallback: false,
-      prompt: definition.prompt,
-      stream: definition.stream,
-      tool: definition.tool,
-    });
+    const probe = definition.name === "tool-followup"
+      ? await runSmokeToolFollowupProbe(client)
+      : await runSmokeProbe(client, {
+          allowStreamFallback: false,
+          prompt: definition.prompt,
+          stream: definition.stream,
+          tool: definition.tool,
+        });
     results.push({
       ...definition,
       probe,
@@ -4568,7 +4570,7 @@ type SmokeProbeResult =
 
 type ProviderSmokeProbeDefinition = {
   expectedText?: string;
-  name: "text" | "unicode" | "streaming" | "tool-call" | "streaming-tool-call";
+  name: "text" | "unicode" | "streaming" | "tool-call" | "streaming-tool-call" | "tool-followup";
   prompt: string;
   stream: boolean;
   tool: boolean;
@@ -5251,6 +5253,12 @@ function createProviderSmokeProbeDefinitions(
       stream: true,
       tool: true,
     },
+    {
+      name: "tool-followup",
+      prompt: "Submit the tool result and verify the relay continues the conversation.",
+      stream: false,
+      tool: false,
+    },
   ];
 }
 
@@ -5319,6 +5327,55 @@ async function runSmokeProbe(client: ModelClient, options: SmokeProbeOptions): P
   }
 }
 
+async function runSmokeToolFollowupProbe(client: ModelClient): Promise<SmokeProbeResult> {
+  const startedAt = Date.now();
+
+  try {
+    const firstTurn = await client.createTurn({
+      tools: [MODEL_SMOKE_TOOL],
+      userMessage: "Call the smoke_ping tool exactly once with message set to OK. Do not answer in text.",
+    });
+
+    if (firstTurn.toolCalls.length === 0) {
+      return {
+        durationMs: Date.now() - startedAt,
+        error: "first turn returned no smoke_ping tool call; the follow-up probe cannot run",
+        ok: false,
+        streamFallback: false,
+        textDeltaChunks: 0,
+        toolCalls: [],
+      };
+    }
+
+    const secondTurn = await client.createTurn({
+      previousResponseId: firstTurn.responseId,
+      toolOutputs: firstTurn.toolCalls.map((toolCall) => ({
+        callId: toolCall.callId,
+        output: "OK",
+      })),
+      tools: client.name.startsWith("openai-chat") ? [] : [MODEL_SMOKE_TOOL],
+    });
+
+    return {
+      durationMs: Date.now() - startedAt,
+      ok: true,
+      result: secondTurn,
+      streamFallback: false,
+      textDeltaChunks: 0,
+      toolCalls: firstTurn.toolCalls.map((toolCall) => toolCall.name),
+    };
+  } catch (error) {
+    return {
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+      ok: false,
+      streamFallback: false,
+      textDeltaChunks: 0,
+      toolCalls: [],
+    };
+  }
+}
+
 function evaluateProviderSmokeProbe(
   definition: ProviderSmokeProbeDefinition,
   probe: SmokeProbeResult,
@@ -5346,6 +5403,29 @@ function evaluateProviderSmokeProbe(
     };
   }
 
+  if (definition.name === "tool-followup") {
+    if (probe.result.toolCalls.length > 0) {
+      return {
+        ok: true,
+        summary: "follow-up turn returned another tool call; relay accepted tool results",
+      };
+    }
+
+    const followupText = probe.result.content.trim();
+
+    if (followupText.length === 0) {
+      return {
+        ok: false,
+        summary: "follow-up turn returned neither text nor tool calls after tool results",
+      };
+    }
+
+    return {
+      ok: true,
+      summary: `follow-up turn returned text (${followupText.length} chars)`,
+    };
+  }
+
   if (definition.stream) {
     if (probe.streamFallback) {
       return {
@@ -5355,9 +5435,16 @@ function evaluateProviderSmokeProbe(
     }
 
     if (probe.textDeltaChunks === 0) {
+      if (probe.result.content.trim().length === 0) {
+        return {
+          ok: false,
+          summary: "stream completed without text delta chunks",
+        };
+      }
+
       return {
-        ok: false,
-        summary: "stream completed without text delta chunks",
+        ok: true,
+        summary: "stream forwarded reasoning-only deltas with no content chunks",
       };
     }
 

@@ -784,12 +784,17 @@ session history.
 
 `/providers` prints an offline provider compatibility matrix with the active
 API mode, active base URL, detected profile, recommended setup commands, and
-when to prefer `chat` versus `responses` mode. It does not call the model.
+when to prefer `chat` versus `responses` mode. It also lists the built-in
+provider profiles (SiliconFlow, Volcengine Ark, MiniMax, xAI, Groq,
+OpenRouter, Mistral, and more) that `ccagent --provider <id>` can apply in
+one step. It does not call the model.
 
 `/provider-smoke` runs three quick provider compatibility probes through the
 same model client: plain text, streaming text deltas, and a `smoke_ping`
-tool-call request. Add `--full` or `--profile full` to also test Unicode text
-and streaming tool calls. It prints per-probe pass/fail status, client kind,
+tool-call request. Add `--full` or `--profile full` to also test Unicode text,
+streaming tool calls, and a two-turn `tool-followup` probe that submits the
+tool result back and requires the relay to continue the conversation. It
+prints per-probe pass/fail status, client kind,
 API mode, base URL, profile, usage when available, and short response snippets.
 It also prints a provider diagnosis with warnings and recommended actions, such
 as setting `OPENAI_API_KEY`, switching relay providers from `responses` to
@@ -798,8 +803,10 @@ after changing relay settings or model IDs. Add `--json` for machine-readable
 probe results and diagnosis. Add `--save` to write Markdown and JSON reports
 under `.ccagent/reports/`; saved Markdown reports include the same diagnosis
 and a compatibility profile. The profile marks the run as `mock-only`,
-`failed`, `partial`, or `known-good`, lists text/unicode/streaming/tool-call
-capabilities, and includes reuse commands for the model, API mode, and base URL.
+`failed`, `partial`, or `known-good`, lists
+text/unicode/streaming/tool-call/streaming-tool-call/tool-followup
+capabilities, and includes reuse commands for the model, API mode, and base
+URL.
 Only a real-key full profile with all probes passing should be treated as
 `known-good`.
 Use `/provider-profiles add` to save the latest `known-good` report into
@@ -829,8 +836,14 @@ increase, passed probes decrease, or a previously passing probe disappears.
 
 Real provider calls classify failures before reporting them. Transient errors
 such as 429 rate limits, timeouts, network resets, and 5xx server failures are
-retried with bounded exponential backoff. Final failures include the error kind,
-retryability, attempt count, HTTP status, and provider code when available.
+retried with bounded exponential backoff. Provider-specific signatures are
+recognized too: DeepSeek/MiniMax authentication failures, context-length
+rejections, model/engine-not-found errors, quota exhaustion, and TLS
+certificate errors. Chat-mode relays that route reasoning models sometimes
+leave `content` empty and fill `reasoning_content`; CCAgent falls back to
+the reasoning text so assistant turns never come back empty. Final
+failures include the error kind, retryability, attempt count, HTTP status,
+and provider code when available.
 
 `/code-map` shows the repo's learning map, key files, and study order.
 `/code-map export` writes a Markdown report under `.ccagent/reports/`.
@@ -1601,6 +1614,13 @@ ccagent --provider deepseek
 ccagent --provider moonshot     # Moonshot AI (Kimi)
 ccagent --provider zhipu        # Zhipu AI (GLM)
 ccagent --provider qwen         # Alibaba Cloud Model Studio
+ccagent --provider siliconflow  # SiliconFlow
+ccagent --provider volcengine   # Volcengine Ark (Doubao)
+ccagent --provider minimax      # MiniMax
+ccagent --provider xai          # xAI (Grok)
+ccagent --provider groq         # Groq
+ccagent --provider openrouter   # OpenRouter
+ccagent --provider mistral      # Mistral AI
 ```
 
 A profile writes three user-level values: the default model, `openai.apiMode`

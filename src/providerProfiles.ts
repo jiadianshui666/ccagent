@@ -1,7 +1,19 @@
 import { setUserConfigValue, type UserConfigSetResult } from "./config.js";
 import type { OpenAIApiMode } from "./model.js";
 
-export const PROVIDER_PROFILE_IDS = ["deepseek", "moonshot", "zhipu", "qwen"] as const;
+export const PROVIDER_PROFILE_IDS = [
+  "deepseek",
+  "groq",
+  "minimax",
+  "mistral",
+  "moonshot",
+  "openrouter",
+  "qwen",
+  "siliconflow",
+  "volcengine",
+  "xai",
+  "zhipu",
+] as const;
 
 export type ProviderProfileId = (typeof PROVIDER_PROFILE_IDS)[number];
 
@@ -62,6 +74,83 @@ export const PROVIDER_PROFILES: Record<ProviderProfileId, ProviderProfile> = {
     notes: [
       "DashScope OpenAI compatibility mode.",
       "qwen-max offers higher capability at higher cost.",
+    ],
+  },
+  groq: {
+    id: "groq",
+    name: "Groq",
+    baseURL: "https://api.groq.com/openai/v1",
+    apiMode: "chat",
+    model: "llama-3.3-70b-versatile",
+    notes: [
+      "Fast OpenAI-compatible inference for hosted open models.",
+      "Newer Llama 4 class models replace older IDs over time; update model when Groq rotates its catalog.",
+    ],
+  },
+  minimax: {
+    id: "minimax",
+    name: "MiniMax",
+    baseURL: "https://api.minimaxi.com/v1",
+    apiMode: "chat",
+    model: "MiniMax-M3",
+    notes: [
+      "OpenAI-compatible endpoint on the MiniMax international platform.",
+      "Model IDs are case-sensitive; update model when MiniMax ships a newer release.",
+    ],
+  },
+  mistral: {
+    id: "mistral",
+    name: "Mistral AI",
+    baseURL: "https://api.mistral.ai/v1",
+    apiMode: "chat",
+    model: "mistral-large-latest",
+    notes: [
+      "OpenAI-compatible chat endpoint with tool calling.",
+      "Date-tagged model IDs exist alongside the latest alias; update model when Mistral moves the alias.",
+    ],
+  },
+  openrouter: {
+    id: "openrouter",
+    name: "OpenRouter",
+    baseURL: "https://openrouter.ai/api/v1",
+    apiMode: "chat",
+    model: "openrouter/auto",
+    notes: [
+      "One key routes to many hosted models using provider/model slugs.",
+      "openrouter/auto picks a model automatically; pin any slug from the OpenRouter model list instead.",
+    ],
+  },
+  siliconflow: {
+    id: "siliconflow",
+    name: "SiliconFlow",
+    baseURL: "https://api.siliconflow.cn/v1",
+    apiMode: "chat",
+    model: "deepseek-ai/DeepSeek-V3",
+    notes: [
+      "OpenAI-compatible endpoint for hosted open models.",
+      "Model IDs use the full provider/model slug from the SiliconFlow catalog; update model when the catalog rotates.",
+    ],
+  },
+  volcengine: {
+    id: "volcengine",
+    name: "Volcengine Ark (Doubao)",
+    baseURL: "https://ark.cn-beijing.volces.com/api/v3",
+    apiMode: "chat",
+    model: "doubao-seed-2-1-pro-260915",
+    notes: [
+      "Doubao model IDs are date-versioned; update model as Volcengine releases newer versions.",
+      "Deployment endpoint IDs (ep-...) also work after wiring the endpoint to the base URL.",
+    ],
+  },
+  xai: {
+    id: "xai",
+    name: "xAI (Grok)",
+    baseURL: "https://api.x.ai/v1",
+    apiMode: "chat",
+    model: "grok-4",
+    notes: [
+      "OpenAI-compatible endpoint for Grok models.",
+      "Faster and newer variants ship under IDs like grok-4-fast; update model when xAI releases new versions.",
     ],
   },
 };
