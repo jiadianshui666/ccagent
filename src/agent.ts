@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readFile, realpath } from "node:fs/promises";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
   createModelClient,
   type ModelClient,
@@ -2658,7 +2658,11 @@ export class Agent {
     displayLines: string[];
     promptContext?: string;
   }> {
-    const paths = extractSuggestedNextReadPaths(repairContent).slice(0, 5);
+    const paths = await Promise.all(
+      extractSuggestedNextReadPaths(repairContent)
+        .slice(0, 5)
+        .map((path) => relativizeFailurePathForWorkspace(path, this.workspaceRoot)),
+    );
 
     if (paths.length === 0) {
       return {
@@ -2686,7 +2690,11 @@ export class Agent {
     displayLines: string[];
     promptContext: string[];
   }> {
-    const paths = extractInitialRepairReadPaths(failure).slice(0, 5);
+    const paths = await Promise.all(
+      extractInitialRepairReadPaths(failure)
+        .slice(0, 5)
+        .map((path) => relativizeFailurePathForWorkspace(path, this.workspaceRoot)),
+    );
 
     if (paths.length === 0) {
       return {
@@ -3984,6 +3992,46 @@ function extractSuggestedNextReadPaths(content: string): string[] {
   }
 
   return uniqueStrings(paths);
+}
+
+async function relativizeFailurePathForWorkspace(
+  path: string,
+  workspaceRoot: string,
+): Promise<string> {
+  const trimmed = path.trim();
+
+  if (!isAbsolute(trimmed)) {
+    return trimmed;
+  }
+
+  const workspaceAbsolute = resolve(workspaceRoot);
+  const lexicalRelative = relative(workspaceAbsolute, trimmed);
+
+  if (
+    lexicalRelative !== "" &&
+    lexicalRelative !== ".." &&
+    !lexicalRelative.startsWith(`..${sep}`) &&
+    !isAbsolute(lexicalRelative)
+  ) {
+    return lexicalRelative;
+  }
+
+  try {
+    const realWorkspace = await realpath(workspaceAbsolute);
+    const realTarget = await realpath(trimmed);
+
+    if (realTarget === realWorkspace) {
+      return ".";
+    }
+
+    if (realTarget.startsWith(`${realWorkspace}${sep}`)) {
+      return realTarget.slice(realWorkspace.length + 1);
+    }
+  } catch {
+    // Keep the original path when it cannot be resolved.
+  }
+
+  return trimmed;
 }
 
 function extractInitialRepairReadPaths(failure: SessionVerificationFailureRecord): string[] {
