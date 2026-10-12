@@ -1536,10 +1536,15 @@ test("Agent summarizes failed suggested verification output", async () => {
   try {
     await mkdir(join(workspaceRoot, "src"), { recursive: true });
     await writeFile(
+      join(workspaceRoot, "build.js"),
+      "console.error('BUILD ERROR: bad import');\nprocess.exit(1);\n",
+      "utf8",
+    );
+    await writeFile(
       join(workspaceRoot, "package.json"),
       `${JSON.stringify({
         scripts: {
-          build: "node -e \"console.error('BUILD_ERROR bad import'); process.exit(2)\"",
+          build: "node build.js",
           typecheck: "node -e \"console.log('typecheck should not run')\"",
         },
       }, null, 2)}\n`,
@@ -1561,7 +1566,7 @@ test("Agent summarizes failed suggested verification output", async () => {
     assert.match(response.content, /exitCode: 1/);
     assert.match(response.content, /likely: command output reported an error/);
     assert.match(response.content, /next: inspect the key stderr\/stdout line above and rerun the smallest failing command/);
-    assert.match(response.content, /stderr: BUILD_ERROR bad import/);
+    assert.match(response.content, /stderr: BUILD ERROR: bad import/);
     assert.match(response.content, /remediation:/);
     assert.match(response.content, /reproduce the exact failed command/);
     assert.match(response.content, /Stopped after command 1\./);

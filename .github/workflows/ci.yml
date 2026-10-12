@@ -34,7 +34,13 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Lint commit messages
-        uses: wagoid/commitlint-github-action@v6
+        shell: bash
+        run: |
+          from="${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$from" ] || [ "$from" = "0000000000000000000000000000000000000000" ]; then
+            from="HEAD~1"
+          fi
+          npx commitlint --from "$from" --to "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
 
   test:
     name: Node ${{ matrix.node }} on ${{ matrix.os }}
