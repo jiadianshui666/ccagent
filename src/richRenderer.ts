@@ -289,6 +289,7 @@ export function createRichRenderer(output: Writable, options: RichRendererOption
   let barVisible = false;
   let barBelowCursor = false;
   let hintsVisible = false;
+  let lastHintsLine: string | null = null;
   let pendingExpansion: { body: string; title: string } | undefined;
   const liveStream = {
     active: false,
@@ -693,7 +694,9 @@ export function createRichRenderer(output: Writable, options: RichRendererOption
     write(`\x1b7`);
 
     if (hintsVisible) {
-      write(`\x1b[1A\r\x1b[2K${buildHintsLine()}`);
+      const repaintedHintsLine = buildHintsLine();
+      lastHintsLine = repaintedHintsLine;
+      write(`\x1b[1A\r\x1b[2K${repaintedHintsLine}`);
       write(`\x1b[2B`);
     } else {
       write(`\x1b[1B`);
@@ -844,22 +847,30 @@ export function createRichRenderer(output: Writable, options: RichRendererOption
       resetLiveStream();
       withBar(() => {
         if (barActive && (richStatus.hints?.length ?? 0) > 0) {
-          write(buildHintsLine());
+          const promptHintsLine = buildHintsLine();
+          write(promptHintsLine);
           write("\n");
+          lastHintsLine = promptHintsLine;
         }
 
         write(prompt);
       });
 
       if (barActive) {
-        write(`\x1b[1A\x1b[${stripAnsi(prompt).length}C`);
+        write(`\x1b[1A\r\x1b[${stripAnsi(prompt).length}C`);
         barBelowCursor = true;
         hintsVisible = (richStatus.hints?.length ?? 0) > 0;
       }
     },
 
     updateInputEstimate(tokens: number) {
-      richStatus.inputTokensEstimate = Math.max(0, Math.floor(tokens));
+      const estimate = Math.max(0, Math.floor(tokens));
+
+      if (estimate === richStatus.inputTokensEstimate) {
+        return;
+      }
+
+      richStatus.inputTokensEstimate = estimate;
 
       if (barActive && barVisible) {
         repaintBar();
@@ -896,6 +907,12 @@ export function createRichRenderer(output: Writable, options: RichRendererOption
 
       richStatus.hints = hints;
       const line = buildHintsLine();
+
+      if (line === lastHintsLine) {
+        return;
+      }
+
+      lastHintsLine = line;
 
       if (!line) {
         write("\x1b7\x1b[1A\r\x1b[2K\x1b8");

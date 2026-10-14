@@ -376,7 +376,7 @@ test("rich renderer pins a bottom status bar around prompts and streaming", asyn
   assert.match(withPrompt, /banner-ish\n/);
   assert.match(withPrompt, /\r\x1b\[2KCCAgent > /);
   assert.match(withPrompt, /CCAgent > \n── model - /);
-  assert.ok(withPrompt.endsWith("\x1b[1A\x1b[10C"));
+  assert.ok(withPrompt.endsWith("\x1b[1A\r\x1b[10C"));
 
   const beforeStream = withPrompt.length;
 
@@ -640,7 +640,7 @@ test("rich renderer draws a dim shortcut hints line above the prompt", async () 
 
   assert.match(text, /\x1b\[2m \/help  \/model \x1b\[0m\n/);
   assert.match(text, /CCAgent > \n/);
-  assert.ok(text.endsWith("\x1b[1A\x1b[10C"));
+  assert.ok(text.endsWith("\x1b[1A\r\x1b[10C"));
 });
 
 test("rich renderer redraws the pinned hints line in place while typing", async () => {
@@ -661,6 +661,10 @@ test("rich renderer redraws the pinned hints line in place while typing", async 
 
   renderer.redrawHints(["/he", "/help", "/hello"]);
   assert.equal(output.read().slice(before), "\x1b7\x1b[1A\r\x1b[2K /he  /help  /hello \x1b8");
+
+  const beforeNoop = output.read().length;
+  renderer.redrawHints(["/he", "/help", "/hello"]);
+  assert.equal(output.read().length, beforeNoop);
 
   renderer.redrawHints([]);
   assert.ok(output.read().endsWith("\x1b7\x1b[1A\r\x1b[2K\x1b8"));
@@ -716,6 +720,27 @@ test("rich renderer repaints the hints line together with the bar on resize", as
 
   assert.match(resized, /\x1b7\x1b\[1A\r\x1b\[2K \/help \x1b\[2B\r\x1b\[2K/);
   assert.ok(resized.endsWith("\x1b8"));
+});
+
+test("rich renderer repaints the bar only when the input estimate changes", async () => {
+  const output = captureStream();
+  const renderer = createRichRenderer(output.stream, {
+    columns: 60,
+    theme: createRichTheme(false),
+  });
+
+  await renderer.writePromptStatus({ allowEdits: false, useSession: true });
+  await renderer.writePromptLine("CCAgent > ");
+  output.read();
+
+  renderer.updateInputEstimate(0);
+  const beforeSameEstimate = output.read().length;
+  renderer.updateInputEstimate(0);
+  assert.equal(output.read().length, beforeSameEstimate);
+
+  renderer.updateInputEstimate(1);
+  const repainted = output.read().slice(beforeSameEstimate);
+  assert.match(repainted, /in\u22481 tok/);
 });
 
 test("rich renderer colors badge states and the live token spinner", async () => {
