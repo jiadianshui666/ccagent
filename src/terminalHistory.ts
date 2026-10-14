@@ -149,6 +149,45 @@ export function formatTerminalHistory(state: TerminalHistoryState, limit = 20): 
   return lines.join("\n");
 }
 
+export function searchTerminalHistoryEntries(
+  entries: string[],
+  term: string,
+  limit = 8,
+): string[] {
+  const needle = term.trim().toLowerCase();
+
+  if (needle.length === 0) {
+    return [];
+  }
+
+  const scored: Array<{ entry: string; score: number }> = [];
+
+  for (const entry of entries) {
+    const lower = entry.toLowerCase();
+    const index = lower.indexOf(needle);
+
+    if (index === -1) {
+      continue;
+    }
+
+    let score = index;
+
+    if (lower.startsWith(needle)) {
+      score -= 100;
+    }
+
+    if (lower === needle) {
+      score -= 10000;
+    }
+
+    scored.push({ entry, score });
+  }
+
+  scored.sort((left, right) => left.score - right.score);
+
+  return scored.slice(0, Math.max(1, Math.min(50, Math.floor(limit)))).map((item) => item.entry);
+}
+
 export function getTerminalHistoryPath(workspaceRoot: string): string {
   return join(workspaceRoot, ".ccagent", "history");
 }

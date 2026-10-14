@@ -11,6 +11,7 @@ import {
   loadTerminalHistory,
   normalizeTerminalHistoryEntries,
   saveTerminalHistory,
+  searchTerminalHistoryEntries,
   shouldPersistTerminalHistoryEntry,
 } from "../src/terminalHistory.js";
 
@@ -36,6 +37,33 @@ test("terminal history normalizes recent entries and filters unsafe values", () 
   assert.equal(shouldPersistTerminalHistoryEntry("/input-history 10"), false);
   assert.equal(shouldPersistTerminalHistoryEntry("run echo hello"), true);
   assert.equal(shouldPersistTerminalHistoryEntry("token=abc123"), false);
+});
+
+test("terminal history search ranks prefix and exact matches", () => {
+  const entries = [
+    "/help model",
+    "list files",
+    "list skillsling",
+    "/ls src",
+    "explain list_files output",
+    "list",
+    "list files and skills",
+  ];
+
+  assert.deepEqual(searchTerminalHistoryEntries(entries, "list"), [
+    "list",
+    "list files",
+    "list skillsling",
+    "list files and skills",
+    "explain list_files output",
+  ]);
+  assert.deepEqual(searchTerminalHistoryEntries(entries, "skills"), [
+    "list skillsling",
+    "list files and skills",
+  ]);
+  assert.deepEqual(searchTerminalHistoryEntries(entries, ""), []);
+  assert.deepEqual(searchTerminalHistoryEntries(entries, "missing"), []);
+  assert.deepEqual(searchTerminalHistoryEntries(entries, "list", 2), ["list", "list files"]);
 });
 
 test("terminal history saves, loads, formats, and clears the workspace file", async () => {

@@ -108,9 +108,47 @@ test("boxText renders a bordered box with title and truncation footer", () => {
   assert.match(box, /… \(1 more lines\)/);
   assert.match(box, /└─+┘\n$/);
 
+  const expandable = boxText("line one\nline two\nline three\nline four", {
+    expandable: true,
+    theme,
+    maxWidth: 40,
+    maxLines: 3,
+    title: "demo",
+  });
+
+  assert.match(expandable, /\(1 more lines · press e to expand\)/);
+
   const empty = boxText("", { theme, maxWidth: 40, title: "demo" });
 
   assert.match(empty, /\(empty\)/);
+});
+
+test("rich renderer folds long tool output and expands it on demand", async () => {
+  const output = captureStream();
+  const renderer = createRichRenderer(output.stream, {
+    columns: 50,
+    theme: createRichTheme(false),
+  });
+  const body = Array.from({ length: 20 }, (_, index) => `line ${index} of the tool output`).join("\n");
+
+  await renderer.writeAgentStreamEvent({
+    type: "tool_result",
+    toolName: "run_shell",
+    content: body,
+  });
+
+  const folded = output.read();
+
+  assert.match(folded, /more lines · press e to expand\)/);
+  assert.doesNotMatch(folded, /line 19/);
+
+  assert.equal(renderer.tryExpandFoldedOutput(), true);
+
+  const expanded = output.read();
+
+  assert.match(expanded, /run_shell output \(expanded\)/);
+  assert.match(expanded, /line 19 of the tool output/);
+  assert.equal(renderer.tryExpandFoldedOutput(), false);
 });
 
 test("boxText colors diff lines when the content is a diff", () => {

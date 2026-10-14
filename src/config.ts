@@ -17,6 +17,7 @@ export type CCAgentConfig = {
   };
   ui?: {
     promptHints?: string[];
+    bell?: boolean;
   };
   context?: {
     auto?: boolean;
@@ -82,6 +83,7 @@ export type ConfigKey =
   | "model"
   | "context.auto"
   | "ui.promptHints"
+  | "ui.bell"
   | "openai.apiMode"
   | "openai.baseURL"
   | "openai.embeddingModel"
@@ -125,6 +127,7 @@ export type ConfigUnsetResult = {
 export type UserConfigKey =
   | "model"
   | "ui.promptHints"
+  | "ui.bell"
   | "openai.apiMode"
   | "openai.baseURL"
   | "openai.embeddingModel"
@@ -179,6 +182,7 @@ const CONFIG_FILE = "config.json";
 const USER_CONFIG_KEYS: ReadonlySet<string> = new Set([
   "model",
   "ui.promptHints",
+  "ui.bell",
   "openai.apiMode",
   "openai.baseURL",
   "openai.embeddingModel",
@@ -187,7 +191,7 @@ const USER_CONFIG_KEYS: ReadonlySet<string> = new Set([
   "openai.retry.maxDelayMs",
 ]);
 const USER_CONFIG_KEY_LIST =
-  "model, ui.promptHints, openai.apiMode, openai.baseURL, openai.embeddingModel, openai.retry.baseDelayMs, openai.retry.maxAttempts, openai.retry.maxDelayMs";
+  "model, ui.promptHints, ui.bell, openai.apiMode, openai.baseURL, openai.embeddingModel, openai.retry.baseDelayMs, openai.retry.maxAttempts, openai.retry.maxDelayMs";
 const DEFAULT_CONFIG: CCAgentConfig = {
   model: "gpt-5.5",
   mcp: {
@@ -306,6 +310,11 @@ export async function setConfigValue(
     const hints = parsePromptHintsSetValue(normalizedValue);
     ui.promptHints = hints;
     storedValue = hints.length > 0 ? hints.join(", ") : "(none)";
+  } else if (normalizedKey === "ui.bell") {
+    const ui = ensureObject(config, "ui");
+    const enabled = parseBooleanConfigValue(normalizedValue);
+    ui.bell = enabled;
+    storedValue = String(enabled);
   } else if (
     normalizedKey === "toolPolicy.deny" ||
     normalizedKey === "toolPolicy.requireApproval" ||
@@ -450,6 +459,11 @@ export async function setUserConfigValue(
     const hints = parsePromptHintsSetValue(normalizedValue);
     ui.promptHints = hints;
     storedValue = hints.length > 0 ? hints.join(", ") : "(none)";
+  } else if (normalizedKey === "ui.bell") {
+    const ui = ensureObject(config, "ui");
+    const enabled = parseBooleanConfigValue(normalizedValue);
+    ui.bell = enabled;
+    storedValue = String(enabled);
   } else if (isOpenAIRetryConfigKey(normalizedKey)) {
     const openai = ensureObject(config, "openai");
     const retry = ensureObject(openai, "retry");
@@ -700,6 +714,7 @@ export function formatLoadedConfig(loaded: LoadedConfig): string {
     `MCP enabled: ${loaded.config.mcp?.enabled === true ? "yes" : "no"}`,
     `MCP servers: ${Object.keys(loaded.config.mcp?.servers ?? {}).length}`,
     `Prompt hint bar: ${formatPromptHintsDisplay(loaded.config.ui?.promptHints)}`,
+    `Turn end bell: ${loaded.config.ui?.bell === true ? "on" : "off"}`,
     `Auto-approved shell commands: ${loaded.config.autoApprove?.shellCommands?.length ?? 0}`,
     `Shell sandbox: ${loaded.config.toolPolicy?.shellSandbox ?? "off"}${formatShellSandboxTail(loaded.config.toolPolicy?.shellSandboxImage, loaded.config.toolPolicy?.shellSandboxNetwork, loaded.config.toolPolicy?.shellSandbox)}`,
     `Shell execution guard: ${loaded.config.toolPolicy?.executionGuard ?? "deny"}`,
@@ -942,6 +957,10 @@ function normalizeConfigKey(key: string): ConfigKey {
     return "ui.promptHints";
   }
 
+  if (trimmed === "ui.bell") {
+    return "ui.bell";
+  }
+
   if (trimmed === "openai.apiMode") {
     return "openai.apiMode";
   }
@@ -1023,7 +1042,7 @@ function normalizeConfigKey(key: string): ConfigKey {
   }
 
   throw new Error(
-    'Unsupported config key. Supported keys: model, context.auto, ui.promptHints, openai.apiMode, openai.baseURL, openai.embeddingModel, openai.retry.maxAttempts, openai.retry.baseDelayMs, openai.retry.maxDelayMs, toolPolicy.allowWritePaths, toolPolicy.deny, toolPolicy.denyRisk, toolPolicy.denyWritePaths, toolPolicy.requireApproval, toolPolicy.requireApprovalRisk, toolPolicy.shellSandbox, toolPolicy.shellSandboxImage, toolPolicy.shellSandboxNetwork, toolPolicy.shellSandboxReadOnly, toolPolicy.shellSandboxMemoryMb, toolPolicy.shellSandboxCpus, toolPolicy.shellSandboxPidsLimit, toolPolicy.executionGuard.',
+    'Unsupported config key. Supported keys: model, context.auto, ui.promptHints, ui.bell, openai.apiMode, openai.baseURL, openai.embeddingModel, openai.retry.maxAttempts, openai.retry.baseDelayMs, openai.retry.maxDelayMs, toolPolicy.allowWritePaths, toolPolicy.deny, toolPolicy.denyRisk, toolPolicy.denyWritePaths, toolPolicy.requireApproval, toolPolicy.requireApprovalRisk, toolPolicy.shellSandbox, toolPolicy.shellSandboxImage, toolPolicy.shellSandboxNetwork, toolPolicy.shellSandboxReadOnly, toolPolicy.shellSandboxMemoryMb, toolPolicy.shellSandboxCpus, toolPolicy.shellSandboxPidsLimit, toolPolicy.executionGuard.',
   );
 }
 
@@ -1293,6 +1312,10 @@ function readParsedConfigValue(config: CCAgentConfig, key: ConfigKey): string | 
     return hints === undefined ? undefined : hints.join(", ");
   }
 
+  if (key === "ui.bell") {
+    return config.ui?.bell === undefined ? undefined : String(config.ui.bell);
+  }
+
   if (key === "openai.apiMode") {
     return config.openai?.apiMode;
   }
@@ -1371,6 +1394,24 @@ function deleteConfigValue(config: Record<string, unknown>, key: ConfigKey): boo
     const uiConfig = ui as Record<string, unknown>;
     const existed = "promptHints" in uiConfig;
     delete uiConfig.promptHints;
+
+    if (Object.keys(uiConfig).length === 0) {
+      delete config.ui;
+    }
+
+    return existed;
+  }
+
+  if (key === "ui.bell") {
+    const ui = config.ui;
+
+    if (!ui || typeof ui !== "object" || Array.isArray(ui)) {
+      return false;
+    }
+
+    const uiConfig = ui as Record<string, unknown>;
+    const existed = "bell" in uiConfig;
+    delete uiConfig.bell;
 
     if (Object.keys(uiConfig).length === 0) {
       delete config.ui;
@@ -1577,7 +1618,29 @@ function parseUiConfig(value: unknown, warnings: string[]): CCAgentConfig["ui"] 
     }
   }
 
+  if (source.bell !== undefined) {
+    if (typeof source.bell === "boolean") {
+      ui.bell = source.bell;
+    } else {
+      warnings.push("Ignoring ui.bell because it is not a boolean.");
+    }
+  }
+
   return ui;
+}
+
+function parseBooleanConfigValue(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+
+  if (["true", "on", "yes", "1"].includes(normalized)) {
+    return true;
+  }
+
+  if (["false", "off", "no", "0"].includes(normalized)) {
+    return false;
+  }
+
+  throw new Error("Expected a boolean value (true/false, on/off, yes/no, or 1/0).");
 }
 
 function parsePromptHintsSetValue(value: string): string[] {

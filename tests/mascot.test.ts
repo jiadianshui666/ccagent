@@ -93,11 +93,17 @@ test("mascot themes switch via CCAGENT_THEME and default to ocean", () => {
   try {
     delete process.env.CCAGENT_THEME;
     assert.equal(getMascotTheme(), "ocean");
-    process.env.CCAGENT_THEME = "dawn";
-    assert.equal(getMascotTheme(), "dawn");
+
+    for (const theme of ["dawn", "dusk", "forest", "sunset"] as const) {
+      process.env.CCAGENT_THEME = theme;
+      assert.equal(getMascotTheme(), theme);
+    }
+
     process.env.CCAGENT_THEME = "neon";
     assert.equal(getMascotTheme(), "ocean");
-    assert.notEqual(MASCOT_THEMES.ocean.top, MASCOT_THEMES.dawn.top);
+
+    const topPaints = Object.values(MASCOT_THEMES).map((palette) => palette.top);
+    assert.equal(new Set(topPaints).size, topPaints.length);
   } finally {
     if (previous === undefined) {
       delete process.env.CCAGENT_THEME;

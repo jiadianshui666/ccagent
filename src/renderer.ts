@@ -11,6 +11,8 @@ export type OutputRenderer = {
   writePromptStatus?(status: RichPromptStatus): Promise<void>;
   writeRichBlock?(content: string, title?: string): Promise<void>;
   redrawHints?(hints: string[]): void;
+  updateInputEstimate?(tokens: number): void;
+  tryExpandFoldedOutput?(): boolean;
 };
 
 export type JsonLineOutputEvent =

@@ -68,6 +68,7 @@ import { buildCodeMap, exportCodeMapReport, formatCodeMap } from "./codeMap.js";
 import {
   completeInteractiveInputWithWorkspace,
   completeSlashCommandHints,
+  type InteractiveCompletionResult,
 } from "./completion.js";
 import {
   addMcpServer,
@@ -194,6 +195,7 @@ import {
 import {
   createDefaultRichTheme,
   createRichRenderer,
+  estimateTextTokens,
 } from "./richRenderer.js";
 import {
   CHECKPOINT_LOAD_BACKUP_PREFIX,
@@ -216,17 +218,28 @@ import {
   formatTerminalHistory,
   loadTerminalHistory,
   saveTerminalHistory,
+  searchTerminalHistoryEntries,
   TERMINAL_HISTORY_LIMIT,
   type TerminalHistoryState,
 } from "./terminalHistory.js";
+import { createPasteGuardStream } from "./pasteGuard.js";
 
 const INPUT_CANCELLED = Symbol("ccagent.input-cancelled");
+const INPUT_SEARCH = Symbol("ccagent.input-search");
 
-type ReadOutcome = string | null | typeof INPUT_CANCELLED;
+type KeypressInfo = {
+  name?: string;
+  ctrl?: boolean;
+  shift?: boolean;
+  meta?: boolean;
+  sequence?: string;
+};
+
+type ReadOutcome = string | null | typeof INPUT_CANCELLED | typeof INPUT_SEARCH;
 
 type ReadOptions = {
   keepReadlineHistory?: boolean;
-  onInput?: (line: string) => void | Promise<void>;
+  onInput?: (line: string, key: KeypressInfo | undefined) => void | Promise<void>;
   promptLine?: (prompt: string) => void | Promise<void>;
 };
 
@@ -254,6 +267,7 @@ class LineReader {
   private closed = false;
   private interrupted = false;
   private pumpStarted = false;
+  private searchLine: string | undefined;
 
   constructor(
     private readonly rl: Interface,
@@ -268,10 +282,8 @@ class LineReader {
     }
   }
 
-  async read(prompt: string, options: ReadOptions = {}): Promise<string | null> {
-    const outcome = await this.takeTurn(prompt, options, false);
-
-    return outcome === INPUT_CANCELLED ? null : outcome;
+  async read(prompt: string, options: ReadOptions = {}): Promise<ReadOutcome> {
+    return this.takeTurn(prompt, options, false);
   }
 
   async readContinuation(prompt: string, options: ReadOptions = {}): Promise<ReadOutcome> {
@@ -294,6 +306,90 @@ class LineReader {
     this.clearInterruptedLine();
   }
 
+  requestSearch(): void {
+    const waiter = this.waiters.shift();
+
+    if (waiter) {
+      waiter(INPUT_SEARCH);
+    }
+  }
+
+  getLine(): string {
+    return this.rl.line;
+  }
+
+  hasLineInput(): boolean {
+    return this.rl.line.trim().length > 0;
+  }
+
+  beginSearchTurn(): void {
+    this.searchLine = this.rl.line;
+  }
+
+  isSearchTurn(): boolean {
+    return this.searchLine !== undefined;
+  }
+
+  endSearchTurn(): void {
+    this.searchLine = undefined;
+  }
+
+  restorePreSearchLine(): void {
+    if (this.searchLine !== undefined) {
+      this.replaceCurrentLine(this.searchLine);
+    }
+  }
+
+  cancelSearch(): void {
+    const saved = this.searchLine ?? "";
+
+    this.cancelPendingInput();
+    this.replaceCurrentLine(saved);
+    this.endSearchTurn();
+  }
+
+  clearCurrentLine(): void {
+    const iface = this.rl as unknown as {
+      line: string;
+      cursor: number;
+      _refreshLine?: () => void;
+    };
+
+    iface.line = "";
+    iface.cursor = 0;
+    iface._refreshLine?.();
+  }
+
+  replaceCurrentLine(text: string): void {
+    const iface = this.rl as unknown as {
+      line: string;
+      cursor: number;
+      _refreshLine?: () => void;
+    };
+
+    iface.line = text;
+    iface.cursor = text.length;
+    iface._refreshLine?.();
+  }
+
+  consumeTrailingInputChar(char: string): void {
+    const iface = this.rl as unknown as {
+      line: string;
+      cursor: number;
+      _refreshLine?: () => void;
+    };
+
+    if (char.length === 1 && iface.line.endsWith(char)) {
+      iface.line = iface.line.slice(0, -1);
+
+      if (iface.cursor > iface.line.length) {
+        iface.cursor = iface.line.length;
+      }
+
+      iface._refreshLine?.();
+    }
+  }
+
   setHistory(entries: string[]): void {
     this.pinnedHistory = [...entries];
 
@@ -314,8 +410,8 @@ class LineReader {
     const stopListeningForInput =
       options.onInput !== undefined
         ? (() => {
-            const listener = () => {
-              void Promise.resolve(options.onInput?.(this.rl.line)).catch(() => undefined);
+            const listener = (chunk: string, key: KeypressInfo | undefined) => {
+              void Promise.resolve(options.onInput?.(this.rl.line, key)).catch(() => undefined);
             };
 
             this.inputStream.on("keypress", listener);
@@ -813,8 +909,14 @@ export async function startCli(argv: string[] = []): Promise<void> {
 
   let runtime: Runtime | undefined;
   const terminalHistory = args.useSession ? await loadTerminalHistory(process.cwd()) : null;
+  const guardedInput =
+    args.mode === "interactive" && input.isTTY
+      ? createPasteGuardStream(input)
+      : input;
   let lastSigintAt = 0;
   let sigintExiting = false;
+  let sigintArmed = false;
+  let sigintArmTimer: ReturnType<typeof setTimeout> | undefined;
   const handleSigint = (): void => {
     const now = Date.now();
 
@@ -836,30 +938,51 @@ export async function startCli(argv: string[] = []): Promise<void> {
       return;
     }
 
+    if (reader.isSearchTurn()) {
+      reader.cancelSearch();
+      return;
+    }
+
     if (!runtime || sigintExiting) {
       return;
     }
 
-    sigintExiting = true;
-    void runtime.renderer.writeMessage("Bye.");
-    reader.close();
+    if (reader.hasLineInput()) {
+      reader.clearCurrentLine();
+      return;
+    }
+
+    if (sigintArmed) {
+      sigintExiting = true;
+
+      if (sigintArmTimer) {
+        clearTimeout(sigintArmTimer);
+        sigintArmTimer = undefined;
+      }
+
+      void runtime.renderer.writeMessage("Bye.");
+      reader.close();
+      return;
+    }
+
+    sigintArmed = true;
+    runtime.renderer.redrawHints?.([...resolvePromptHints(runtime), "Ctrl+C again: exit"]);
+
+    if (sigintArmTimer) {
+      clearTimeout(sigintArmTimer);
+    }
+
+    sigintArmTimer = setTimeout(() => {
+      sigintArmed = false;
+      sigintArmTimer = undefined;
+    }, 2000);
+    sigintArmTimer.unref?.();
   };
   const rl = createInterface({
-    input,
+    input: guardedInput,
     output,
     ...(args.mode === "interactive"
-      ? {
-          completer: async (line: string) =>
-            completeInteractiveInputWithWorkspace(line, {
-              checkpointNames: args.useSession
-                ? await loadCheckpointCompletionNames(process.cwd())
-                : [],
-              projectCommands: (await loadProjectCommands(process.cwd())).commands,
-              skillNames: (await loadProjectSkills(process.cwd())).skills.map((skill) => skill.name),
-              toolNames: runtime?.toolRegistry.list().map((tool) => tool.name) ?? [],
-              workspaceRoot: process.cwd(),
-            }),
-        }
+      ? { completer: (line: string): [string[], string] => [[], line] }
       : {}),
     ...(args.mode === "interactive" && terminalHistory
       ? {
@@ -872,9 +995,13 @@ export async function startCli(argv: string[] = []): Promise<void> {
   const reader = new LineReader(
     rl,
     output,
-    input,
+    guardedInput,
     args.mode === "interactive" ? handleSigint : null,
   );
+
+  if (guardedInput !== input) {
+    output.write("\x1b[?2004h");
+  }
 
   if (args.mode === "interactive") {
     process.on("SIGINT", handleSigint);
@@ -911,6 +1038,10 @@ export async function startCli(argv: string[] = []): Promise<void> {
 
     await runInteractive(runtime, reader);
   } finally {
+    if (guardedInput !== input) {
+      output.write("\x1b[?2004l");
+    }
+
     await runtime?.mcp.manager.close();
 
     if (!closed) {
@@ -1160,8 +1291,135 @@ async function runInteractive(runtime: Runtime, reader: LineReader): Promise<voi
     await runtime.renderer.writeMessage(banner);
   }
 
+  const computeCompletions = async (line: string): Promise<InteractiveCompletionResult> =>
+    completeInteractiveInputWithWorkspace(line, {
+      checkpointNames: runtime.useSession
+        ? await loadCheckpointCompletionNames(process.cwd())
+        : [],
+      projectCommands: (await loadProjectCommands(process.cwd())).commands,
+      skillNames: (await loadProjectSkills(process.cwd())).skills.map((skill) => skill.name),
+      toolNames: runtime.toolRegistry.list().map((tool) => tool.name),
+      workspaceRoot: process.cwd(),
+    });
+
+  const tabState = {
+    base: "",
+    generation: 0,
+    index: -1,
+    matches: [] as string[],
+  };
+
+  const buildCompletionHints = (matches: string[], activeIndex: number): string[] => {
+    const active = matches[activeIndex];
+    const shown = matches
+      .slice(0, 8)
+      .map((match) =>
+        match === active
+          ? `> ${truncateForDisplay(match, 64)}`
+          : `  ${truncateForDisplay(match, 64)}`,
+      );
+    const hints = [...shown];
+
+    if (matches.length > shown.length) {
+      hints.push(`+${matches.length - shown.length} more`);
+    }
+
+    hints.push("Tab next, Shift+Tab prev");
+    return hints;
+  };
+
+  const applyTabCompletion = async (
+    line: string,
+    reverse: boolean,
+    hints: string[],
+  ): Promise<void> => {
+    if (line !== tabState.base) {
+      tabState.base = line;
+      tabState.matches = [];
+      tabState.index = -1;
+    }
+
+    if (tabState.matches.length === 0) {
+      const generation = ++tabState.generation;
+
+      try {
+        const [matches] = await computeCompletions(line);
+
+        if (generation !== tabState.generation) {
+          return;
+        }
+
+        tabState.matches = matches.filter((match) => match !== line);
+      } catch {
+        tabState.matches = [];
+      }
+    }
+
+    const matches = tabState.matches;
+
+    if (matches.length === 0) {
+      runtime.renderer.redrawHints?.(hints);
+      return;
+    }
+
+    if (tabState.index === -1) {
+      const prefix = longestCommonPrefix(matches);
+
+      if (prefix.length > tabState.base.length) {
+        reader.replaceCurrentLine(prefix);
+        runtime.renderer.updateInputEstimate?.(estimateTextTokens(prefix));
+        return;
+      }
+
+      tabState.index = 0;
+    } else {
+      tabState.index = reverse
+        ? (tabState.index - 1 + matches.length) % matches.length
+        : (tabState.index + 1) % matches.length;
+    }
+
+    const nextLine = matches[tabState.index];
+
+    if (nextLine === undefined) {
+      return;
+    }
+
+    tabState.base = nextLine;
+    reader.replaceCurrentLine(nextLine);
+    runtime.renderer.updateInputEstimate?.(estimateTextTokens(nextLine));
+    runtime.renderer.redrawHints?.(buildCompletionHints(matches, tabState.index));
+  };
+
+  const buildInputListener =
+    (hints: string[], allowSearch: boolean) =>
+    (line: string, key: KeypressInfo | undefined): void => {
+      runtime.renderer.updateInputEstimate?.(estimateTextTokens(line));
+
+      if (key?.name === "tab") {
+        void applyTabCompletion(line, key.shift === true, hints);
+        return;
+      }
+
+      if (allowSearch && runtime.terminalHistory && key?.ctrl && key.name === "r") {
+        reader.requestSearch();
+        return;
+      }
+
+      if (line !== tabState.base) {
+        tabState.base = line;
+        tabState.matches = [];
+        tabState.index = -1;
+        tabState.generation += 1;
+      }
+
+      const matches = completeSlashCommandHints(line.trimStart());
+      runtime.renderer.redrawHints?.(matches.length > 0 ? matches : hints);
+    };
+
   while (true) {
     const hints = resolvePromptHints(runtime);
+    const mergedUi = mergeUserDefaults(runtime.loadedConfig.config, runtime.userConfig.config).ui;
+    const turnEndBell = mergedUi?.bell === true;
 
     if (runtime.renderer.writePromptStatus) {
       await runtime.renderer.writePromptStatus({
@@ -1177,13 +1435,24 @@ async function runInteractive(runtime: Runtime, reader: LineReader): Promise<voi
       });
     }
 
-    let message: string | null = await reader.read("CCAgent > ", {
+    let message: ReadOutcome = await reader.read("CCAgent > ", {
       promptLine: runtime.renderer.writePromptLine?.bind(runtime.renderer),
-      onInput: (line) => {
-        const matches = completeSlashCommandHints(line.trimStart());
-        runtime.renderer.redrawHints?.(matches.length > 0 ? matches : hints);
-      },
+      onInput: buildInputListener(hints, true),
     });
+
+    if (message === INPUT_CANCELLED) {
+      continue;
+    }
+
+    if (message === INPUT_SEARCH) {
+      const selected = await runHistorySearch(runtime, reader, hints);
+
+      if (selected === null) {
+        continue;
+      }
+
+      message = selected;
+    }
 
     let cancelled = false;
 
@@ -1192,15 +1461,16 @@ async function runInteractive(runtime: Runtime, reader: LineReader): Promise<voi
         const next = await reader.readContinuation("... > ", {
           keepReadlineHistory: true,
           promptLine: runtime.renderer.writePromptLine?.bind(runtime.renderer),
-          onInput: (line) => {
-            const matches = completeSlashCommandHints(line.trimStart());
-            runtime.renderer.redrawHints?.(matches.length > 0 ? matches : hints);
-          },
+          onInput: buildInputListener(hints, false),
         });
 
         if (next === INPUT_CANCELLED) {
           cancelled = true;
           break;
+        }
+
+        if (next === INPUT_SEARCH) {
+          continue;
         }
 
         if (next === null) {
@@ -1220,6 +1490,24 @@ async function runInteractive(runtime: Runtime, reader: LineReader): Promise<voi
       continue;
     }
 
+    if (
+      message.trim() === "e" &&
+      runtime.renderer.tryExpandFoldedOutput?.() === true
+    ) {
+      continue;
+    }
+
+    if (message.trim() === "!!") {
+      const previous = runtime.terminalHistory?.entries[0]?.trim();
+
+      if (previous && previous !== "!!") {
+        message = previous;
+      } else {
+        await runtime.renderer.writeMessage("No previous command in terminal history.");
+        continue;
+      }
+    }
+
     runtime.turnController = new AbortController();
 
     let result: HandleResult;
@@ -1232,6 +1520,10 @@ async function runInteractive(runtime: Runtime, reader: LineReader): Promise<voi
 
     await recordTerminalHistoryInput(runtime, message);
 
+    if (turnEndBell) {
+      output.write("\u0007");
+    }
+
     if (result.shouldExit) {
       break;
     }
@@ -1241,6 +1533,122 @@ async function runInteractive(runtime: Runtime, reader: LineReader): Promise<voi
       await saveCurrentSession(runtime);
     }
   }
+}
+
+function longestCommonPrefix(values: string[]): string {
+  const first = values[0] ?? "";
+
+  if (first.length === 0) {
+    return "";
+  }
+
+  let prefix = first;
+
+  for (const value of values.slice(1)) {
+    while (!value.startsWith(prefix) && prefix.length > 0) {
+      prefix = prefix.slice(0, -1);
+    }
+
+    if (prefix.length === 0) {
+      break;
+    }
+  }
+
+  return prefix;
+}
+
+function truncateForDisplay(value: string, maxLength = 80): string {
+  const collapsed = value.replace(/\s+/g, " ").trim();
+
+  if (collapsed.length <= maxLength) {
+    return collapsed;
+  }
+
+  return `${collapsed.slice(0, maxLength - 3)}...`;
+}
+
+function formatSearchPreview(match: string | null, term: string): string[] {
+  if (term.trim().length === 0) {
+    return ["type to search history, Ctrl+R next, Enter accept, Ctrl+C cancel"];
+  }
+
+  if (match === null) {
+    return ["no match, Ctrl+C cancel"];
+  }
+
+  return [
+    `match: ${truncateForDisplay(match)}`,
+    "Ctrl+R next, Enter accept, Ctrl+C cancel",
+  ];
+}
+
+async function runHistorySearch(
+  runtime: Runtime,
+  reader: LineReader,
+  hints: string[],
+): Promise<string | null> {
+  const entries = runtime.terminalHistory?.entries ?? [];
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  let term = "";
+  let cycleOffset = 0;
+
+  reader.beginSearchTurn();
+
+  try {
+    const outcome = await reader.read("(reverse-i-search)`': ", {
+      keepReadlineHistory: true,
+      promptLine: runtime.renderer.writePromptLine?.bind(runtime.renderer),
+      onInput: (line, key) => {
+        if (key?.name === "escape") {
+          reader.cancelSearch();
+          return;
+        }
+
+        if (line !== term) {
+          term = line;
+          cycleOffset = 0;
+        }
+
+        if (key?.ctrl && key.name === "r") {
+          cycleOffset += 1;
+        }
+
+        const matches =
+          term.trim().length > 0 ? searchTerminalHistoryEntries(entries, term) : [];
+        const preview =
+          matches.length > 0 ? (matches[cycleOffset % matches.length] ?? null) : null;
+
+        runtime.renderer.redrawHints?.(formatSearchPreview(preview, term));
+      },
+    });
+
+    if (outcome !== null && outcome !== INPUT_CANCELLED && outcome !== INPUT_SEARCH) {
+      const matches =
+        outcome.trim().length > 0 ? searchTerminalHistoryEntries(entries, outcome) : [];
+      const chosen =
+        matches.length > 0 ? (matches[cycleOffset % matches.length] ?? null) : null;
+
+      if (chosen !== null) {
+        runtime.renderer.updateInputEstimate?.(estimateTextTokens(chosen));
+        reader.replaceCurrentLine(chosen);
+        reader.endSearchTurn();
+        runtime.renderer.redrawHints?.(hints);
+        return chosen;
+      }
+    }
+  } finally {
+    if (reader.isSearchTurn()) {
+      reader.restorePreSearchLine();
+      reader.endSearchTurn();
+    }
+  }
+
+  runtime.renderer.redrawHints?.(hints);
+  return null;
 }
 
 const SPLASH_FRAME_MS = 90;
@@ -3866,7 +4274,7 @@ async function confirmProjectCommandExecution(
 
   if (runtime.json) {
     const answer = await runtime.reader.read("");
-    const approved = parseApprovalChoice(answer) === "approve";
+    const approved = parseApprovalChoice(typeof answer === "string" ? answer : null) === "approve";
 
     if (!approved) {
       await runtime.renderer.writeFinalResponse({
@@ -3887,7 +4295,7 @@ async function confirmProjectCommandExecution(
 
   while (true) {
     const answer = await runtime.reader.read("Run this project command? [y] yes, [n] no: ");
-    const choice = parseApprovalChoice(answer);
+    const choice = parseApprovalChoice(typeof answer === "string" ? answer : null);
 
     if (choice === "approve") {
       return { approved: true };
@@ -7128,7 +7536,7 @@ async function confirmToolExecution(
 
   if (json) {
     const answer = await reader.read("");
-    const approved = parseApprovalChoice(answer) === "approve";
+    const approved = parseApprovalChoice(typeof answer === "string" ? answer : null) === "approve";
     debug("approval.user_response", { toolName: request.toolName, approved });
     return approved;
   }
@@ -7144,7 +7552,7 @@ async function confirmToolExecution(
       "Approve? [y] yes, [n] no, [s] summary, [d] full diff/details: ",
       { promptLine: renderer.writePromptLine?.bind(renderer) },
     );
-    const choice = parseApprovalChoice(answer);
+    const choice = parseApprovalChoice(typeof answer === "string" ? answer : null);
 
     if (choice === "approve") {
       debug("approval.user_response", { toolName: request.toolName, approved: true });

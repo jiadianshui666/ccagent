@@ -1,5 +1,6 @@
 import type { Writable } from "node:stream";
 import type { AgentResponse, AgentStreamEvent } from "./agent.js";
+import { getMascotTheme, type MascotTheme } from "./mascot.js";
 import type { OutputRenderer } from "./renderer.js";
 import {
   createStreamingTextPainter,
@@ -40,6 +41,45 @@ export type RichTheme = {
   gray(text: string): string;
 };
 
+const RICH_THEME_PALETTES: Record<
+  Exclude<MascotTheme, "ocean">,
+  { red: number; green: number; yellow: number; blue: number; cyan: number; magenta: number; gray: number }
+> = {
+  dawn: { red: 204, green: 150, yellow: 222, blue: 117, cyan: 123, magenta: 212, gray: 102 },
+  forest: { red: 167, green: 114, yellow: 186, blue: 81, cyan: 44, magenta: 135, gray: 102 },
+  sunset: { red: 209, green: 149, yellow: 226, blue: 110, cyan: 153, magenta: 177, gray: 102 },
+  dusk: { red: 168, green: 104, yellow: 180, blue: 153, cyan: 147, magenta: 141, gray: 102 },
+};
+
+export function createRichThemeWithPalette(enabled: boolean, name: MascotTheme): RichTheme {
+  if (name === "ocean") {
+    return createRichTheme(enabled);
+  }
+
+  const palette = RICH_THEME_PALETTES[name];
+  const paint =
+    enabled
+      ? (code: number) => (text: string) => `\x1b[${code}m${text}\x1b[0m`
+      : () => (text: string) => text;
+  const paint256 =
+    enabled
+      ? (code: number) => (text: string) => `\x1b[38;5;${code}m${text}\x1b[0m`
+      : () => (text: string) => text;
+
+  return {
+    enabled,
+    bold: paint(1),
+    dim: paint(2),
+    red: paint256(palette.red),
+    green: paint256(palette.green),
+    yellow: paint256(palette.yellow),
+    blue: paint256(palette.blue),
+    cyan: paint256(palette.cyan),
+    magenta: paint256(palette.magenta),
+    gray: paint256(palette.gray),
+  };
+}
+
 export function createRichTheme(enabled: boolean): RichTheme {
   const paint =
     enabled
@@ -62,7 +102,7 @@ export function createRichTheme(enabled: boolean): RichTheme {
 
 export function createDefaultRichTheme(): RichTheme {
   const noColor = process.env.NO_COLOR !== undefined && process.env.NO_COLOR !== "";
-  return createRichTheme(!noColor);
+  return createRichThemeWithPalette(!noColor, getMascotTheme());
 }
 
 export function wrapText(text: string, width: number): string[] {
@@ -144,6 +184,7 @@ export function truncateLines(
 }
 
 export type RichBoxOptions = {
+  expandable?: boolean;
   maxLines?: number;
   maxWidth?: number;
   theme?: RichTheme;
@@ -193,7 +234,9 @@ export function boxText(content: string, options: RichBoxOptions = {}): string {
   }
 
   if (suppressed > 0) {
-    paintedLines.push(theme.dim(`… (${suppressed} more lines)`));
+    const foldNote = options.expandable === true ? " · press e to expand" : "";
+
+    paintedLines.push(theme.dim(`… (${suppressed} more lines${foldNote})`));
   }
 
   const rows = paintedLines
@@ -211,6 +254,7 @@ export type RichPromptStatus = {
   local?: boolean;
   sandbox?: string;
   hints?: string[];
+  inputTokensEstimate?: number;
 };
 
 export type RichRenderer = OutputRenderer & {
@@ -219,6 +263,8 @@ export type RichRenderer = OutputRenderer & {
   writePromptStatus(status: RichPromptStatus): Promise<void>;
   writeRichBlock(content: string, title?: string): Promise<void>;
   redrawHints(hints: string[]): void;
+  updateInputEstimate(tokens: number): void;
+  tryExpandFoldedOutput(): boolean;
 };
 
 export type RichRendererOptions = {
@@ -243,6 +289,7 @@ export function createRichRenderer(output: Writable, options: RichRendererOption
   let barVisible = false;
   let barBelowCursor = false;
   let hintsVisible = false;
+  let pendingExpansion: { body: string; title: string } | undefined;
   const liveStream = {
     active: false,
     units4: 0,
@@ -322,6 +369,10 @@ export function createRichRenderer(output: Writable, options: RichRendererOption
 
     if (lastUsage.cost && lastUsage.cost !== "(not configured)") {
       parts.push(`cost=${lastUsage.cost}`);
+    }
+
+    if ((richStatus.inputTokensEstimate ?? 0) > 0) {
+      parts.push(theme.dim(`in\u2248${richStatus.inputTokensEstimate} tok`));
     }
 
     if (liveStream.active && liveStream.tokens > 0) {
@@ -511,9 +562,17 @@ export function createRichRenderer(output: Writable, options: RichRendererOption
 
     const prefix = `[tool] ${event.toolName} -> `;
     const body = event.content.startsWith(prefix) ? event.content.slice(prefix.length) : event.content;
+    const innerWidth = Math.max(20, getColumns() - 4);
+    const totalLines = wrapText(stripAnsi(body), innerWidth).length;
+
+    pendingExpansion =
+      totalLines > MAX_TOOL_OUTPUT_LINES
+        ? { body, title: `${event.toolName} output (expanded)` }
+        : undefined;
 
     write(
       boxText(body, {
+        expandable: true,
         theme,
         title: `${event.toolName} output`,
         maxWidth: getColumns(),
@@ -676,6 +735,7 @@ export function createRichRenderer(output: Writable, options: RichRendererOption
     async writeAgentStreamEvent(event) {
       if (event.type === "turn_start") {
         richStatus.modelName = event.modelName;
+        pendingExpansion = undefined;
 
         if (barActive && barVisible) {
           repaintBar();
@@ -768,6 +828,7 @@ export function createRichRenderer(output: Writable, options: RichRendererOption
       richStatus.local = status.local;
       richStatus.sandbox = status.sandbox;
       richStatus.hints = status.hints;
+      richStatus.inputTokensEstimate = status.inputTokensEstimate ?? 0;
 
       if (!barActive) {
         barActive = true;
@@ -795,6 +856,37 @@ export function createRichRenderer(output: Writable, options: RichRendererOption
         barBelowCursor = true;
         hintsVisible = (richStatus.hints?.length ?? 0) > 0;
       }
+    },
+
+    updateInputEstimate(tokens: number) {
+      richStatus.inputTokensEstimate = Math.max(0, Math.floor(tokens));
+
+      if (barActive && barVisible) {
+        repaintBar();
+      }
+    },
+
+    tryExpandFoldedOutput() {
+      if (!pendingExpansion) {
+        return false;
+      }
+
+      const expansion = pendingExpansion;
+      pendingExpansion = undefined;
+
+      withBar(() => {
+        closeText();
+        write(
+          boxText(expansion.body, {
+            theme,
+            title: expansion.title,
+            maxWidth: getColumns(),
+            maxLines: 8192,
+          }),
+        );
+      });
+
+      return true;
     },
 
     redrawHints(hints: string[]) {

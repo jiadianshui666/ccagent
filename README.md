@@ -27,13 +27,25 @@ named `review`. `/skill c<Tab>` can complete a project skill named
 `/checkpoint show be<Tab>` can complete `before-edit`.
 
 Use `/completion` or `/keys` to inspect Tab completion behavior and terminal
-input shortcuts from inside CCAgent.
+input shortcuts from inside CCAgent. A few highlights:
+
+- `Ctrl+R` searches terminal input history; `Enter` accepts the previewed
+  match and `Ctrl+C`/`Esc` cancel.
+- `!!` immediately re-runs the most recent terminal input.
+- Typing `e` and pressing Enter expands the last folded tool output block.
+- Pressing Tab again after a completion cycles through the other matches;
+  `Shift+Tab` cycles backwards.
+- Bracketed paste is enabled while stdin is a TTY, and pasted multi-line text
+  is joined into one input line (a pasted trailing `\` still continues the
+  input).
+
 
 End an input line with a single trailing backslash (`\`) to continue typing on
 the next line. The backslash is removed and the continuation lines are joined
 with newlines before the message is sent. A trailing `\\` (two backslashes)
-stays literal and does not continue the input. Ctrl+C cancels a pending
-multi-line input and returns to a fresh prompt.
+stays literal and does not continue the input. While typing, Ctrl+C clears
+the current line (or cancels a pending multi-line input); on an empty line,
+press Ctrl+C twice within two seconds to exit.
 
 Tab also completes workspace paths for path-oriented commands. For example,
 `/read src/<Tab>` can complete files under `src/`, while `/ls s<Tab>` and
@@ -63,7 +75,8 @@ interface instead of plain text:
 - a bottom status bar shows the configured model (tagged `(local)` when the
   mock model is active), session totals, and policy flags (such as
   `--allow-edits`) and stays pinned while prompts and responses stream, with a
-  live outgoing-token estimate (`out≈N tok`) and a ticking elapsed-time counter
+  live outgoing-token estimate (`out≈N tok`), an incoming input estimate
+  (`in≈N tok`) while typing at the prompt, and a ticking elapsed-time counter
 - the startup banner box and message layout stay readable across terminal
   widths, and the status bar rewraps automatically when the window is resized.
 
@@ -227,6 +240,9 @@ pick the palette:
 
 - `CCAGENT_THEME=ocean` (default): cyan-blue tech gradient.
 - `CCAGENT_THEME=dawn`: warm orange gradient.
+- `CCAGENT_THEME=dusk`: violet-blue evening gradient.
+- `CCAGENT_THEME=forest`: green gradient.
+- `CCAGENT_THEME=sunset`: red-orange gradient.
 
 Set `CCAGENT_NO_SPLASH=1` to skip the splash entirely. On terminals narrower
 than 49 columns CCAgent falls back to a single plain version line, and
@@ -255,7 +271,8 @@ an interactive TTY (pipes, `--json`, one-shot prompts).
   request is aborted immediately, automatic retries are skipped, and the
   turn is reported as canceled instead of crashing or emitting a bogus model
   error.
-- When no turn is running, Ctrl+C exits CCAgent.
+- At the prompt, Ctrl+C clears a partially typed line; on an empty line,
+  press it twice within two seconds to exit.
 
 ## Global Command
 
@@ -556,6 +573,7 @@ ccagent --config-set openai.retry.baseDelayMs 500
 ccagent --config-set openai.retry.maxDelayMs 5000
 ccagent --config-set ui.promptHints /help,/model,/config,/mcp
 ccagent --config-set ui.promptHints off
+ccagent --config-set ui.bell true
 ccagent --config-set toolPolicy.allowWritePaths src/,tests/
 ccagent --config-set toolPolicy.denyWritePaths .ccagent/,package-lock.json
 ccagent --config-set toolPolicy.deny run_shell
@@ -580,6 +598,7 @@ openai.retry.maxAttempts  Provider retry attempts, integer 1-5
 openai.retry.baseDelayMs  Provider retry initial backoff, integer 0-60000
 openai.retry.maxDelayMs   Provider retry maximum backoff, integer 0-60000
 ui.promptHints    Comma-separated shortcut labels for the interactive prompt hint bar, or "off" to hide
+ui.bell           true | false; ring the terminal bell when each turn finishes
 toolPolicy.allowWritePaths    Comma-separated writable files or directories for patch tools
 toolPolicy.denyWritePaths     Comma-separated files or directories blocked for patch tools
 toolPolicy.deny              Comma-separated tool names to disable
@@ -598,8 +617,8 @@ environment variable, or persist it per machine with `ccagent login --api-key
 User-level defaults live at `~/.ccagent/config.json` (on Windows:
 `C:\Users\<you>\.ccagent\config.json`) and apply to every workspace, so relay
 settings do not have to be repeated per project. Precedence for `model`,
-`ui.promptHints`, `openai.apiMode`, `openai.baseURL`, `openai.embeddingModel`, and
-`openai.retry.*` is:
+`ui.promptHints`, `ui.bell`, `openai.apiMode`, `openai.baseURL`,
+`openai.embeddingModel`, and `openai.retry.*` is:
 
 ```text
 environment variable > project .ccagent/config.json > user ~/.ccagent/config.json > built-in default
@@ -614,11 +633,12 @@ ccagent --user-config-set openai.baseURL https://api.wcgio.com/v1
 ccagent --user-config-set openai.embeddingModel text-embedding-3-small
 ccagent --user-config-set openai.retry.maxAttempts 4
 ccagent --user-config-set ui.promptHints /help,/model,/config,/mcp
+ccagent --user-config-set ui.bell true
 ccagent --user-config-get openai.baseURL
 ccagent --user-config-unset openai.baseURL
 ```
 
-User-level config only supports `model`, `ui.promptHints`, and `openai` keys;
+User-level config only supports `model`, `ui.promptHints`, `ui.bell`, and `openai` keys;
 project-scoped settings such as `mcp`, `context`, `autoApprove`, and `toolPolicy` stay in the workspace
 `.ccagent/config.json`. The user directory can be overridden with the
 `CCAGENT_USER_DIR` environment variable, which is also how tests isolate it.

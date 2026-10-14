@@ -194,6 +194,60 @@ test("ui.promptHints can be set, read, hidden, and unset", async () => {
   }
 });
 
+test("ui.bell can be set, read, and unset", async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-config-bell-"));
+
+  try {
+    const setResult = await setConfigValue(workspaceRoot, "ui.bell", "yes");
+    const loaded = await loadConfig(workspaceRoot);
+    const getResult = await getConfigValue(workspaceRoot, "ui.bell");
+
+    assert.equal(setResult.key, "ui.bell");
+    assert.equal(setResult.value, "true");
+    assert.equal(loaded.config.ui?.bell, true);
+    assert.equal(getResult.value, "true");
+    assert.match(formatLoadedConfig(await loadConfig(workspaceRoot)), /Turn end bell: on/);
+
+    await assert.rejects(
+      () => setConfigValue(workspaceRoot, "ui.bell", "sometimes"),
+      /boolean value/,
+    );
+
+    const off = await setConfigValue(workspaceRoot, "ui.bell", "off");
+    assert.equal(off.value, "false");
+    assert.match(formatLoadedConfig(await loadConfig(workspaceRoot)), /Turn end bell: off/);
+
+    const unset = await unsetConfigValue(workspaceRoot, "ui.bell");
+    assert.equal(unset.existed, true);
+    assert.equal((await loadConfig(workspaceRoot)).config.ui, undefined);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig warns for invalid ui bell", async () => {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-config-bell-warn-"));
+
+  try {
+    await mkdir(join(workspaceRoot, ".ccagent"));
+    await writeFile(
+      join(workspaceRoot, ".ccagent", "config.json"),
+      JSON.stringify({
+        ui: {
+          bell: "always",
+        },
+      }),
+    );
+
+    const loaded = await loadConfig(workspaceRoot);
+
+    assert.equal(loaded.config.ui?.bell, undefined);
+    assert.ok(loaded.warnings.some((warning) => warning.includes("ui.bell")));
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 test("loadConfig warns for invalid ui prompt hints", async () => {
   const workspaceRoot = await mkdtemp(join(tmpdir(), "ccagent-config-hints-warn-"));
 

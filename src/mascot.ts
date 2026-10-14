@@ -10,7 +10,7 @@ export type MascotPalette = {
   hint: string;
 };
 
-export type MascotTheme = "dawn" | "ocean";
+export type MascotTheme = "dawn" | "dusk" | "forest" | "ocean" | "sunset";
 
 export const MASCOT_THEMES: Record<MascotTheme, MascotPalette> = {
   ocean: {
@@ -30,6 +30,33 @@ export const MASCOT_THEMES: Record<MascotTheme, MascotPalette> = {
     dim: "\u001b[38;2;60;50;45m",
     accent: "\u001b[38;2;255;170;70m",
     hint: "\u001b[38;2;120;100;90m",
+  },
+  forest: {
+    bg: "\u001b[48;2;8;17;12m",
+    top: "\u001b[38;2;134;239;172m",
+    mid: "\u001b[38;2;66;190;116m",
+    bottom: "\u001b[38;2;22;101;52m",
+    dim: "\u001b[38;2;36;58;46m",
+    accent: "\u001b[38;2;52;211;153m",
+    hint: "\u001b[38;2;110;130;120m",
+  },
+  sunset: {
+    bg: "\u001b[48;2;20;10;12m",
+    top: "\u001b[38;2;255;183;77m",
+    mid: "\u001b[38;2;255;112;67m",
+    bottom: "\u001b[38;2;187;54;37m",
+    dim: "\u001b[38;2;80;50;45m",
+    accent: "\u001b[38;2;255;160;90m",
+    hint: "\u001b[38;2;160;110;90m",
+  },
+  dusk: {
+    bg: "\u001b[48;2;18;16;32m",
+    top: "\u001b[38;2;150;150;255m",
+    mid: "\u001b[38;2;95;95;195m",
+    bottom: "\u001b[38;2;50;40;130m",
+    dim: "\u001b[38;2;55;55;80m",
+    accent: "\u001b[38;2;130;120;255m",
+    hint: "\u001b[38;2;120;120;150m",
   },
 };
 
@@ -185,7 +212,11 @@ export function buildBootGreeting(options: { version: string }): string {
 }
 
 export function getMascotTheme(): MascotTheme {
-  return process.env.CCAGENT_THEME === "dawn" ? "dawn" : "ocean";
+  const name = process.env.CCAGENT_THEME;
+
+  return name !== undefined && Object.prototype.hasOwnProperty.call(MASCOT_THEMES, name)
+    ? (name as MascotTheme)
+    : "ocean";
 }
 
 export const LOGO_COLS = buildCCAgentLogoCanvas("CCAgent").cols;

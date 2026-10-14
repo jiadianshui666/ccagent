@@ -1652,7 +1652,7 @@ test("interactive CLI joins backslash-continuation lines into one message", asyn
     const help = await runCli(workspaceRoot, ["--no-session", "/help", "completion"]);
 
     assert.match(help.stdout, /Continue typing on the next line/);
-    assert.match(help.stdout, /Cancel a pending multi-line input/);
+    assert.match(help.stdout, /Cancel the current or pending multi-line input/);
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }
